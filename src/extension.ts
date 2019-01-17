@@ -3,7 +3,7 @@ import * as moment from "moment";
 import * as path from "path";
 import { fs } from "mz";
 import { Change, ChangeTracker } from './change-tracker';
-import { find } from "lodash";
+import { find, debounce } from "lodash";
 
 type ChangeTreeNode = {
 	type: "change",
@@ -202,6 +202,7 @@ class SessionHistoryTreeProvider implements TreeDataProvider<TreeNode> {
 }
 
 export function activate(context: ExtensionContext) {
+	window.showInformationMessage("TOBY WAS HERE");
 	const rcsProvider: RCSProvider = new RCSProvider();
 	const sessionHistoryTreeProvider = new SessionHistoryTreeProvider(rcsProvider);
 	window.registerTreeDataProvider("session-history", sessionHistoryTreeProvider);
@@ -219,44 +220,42 @@ export function activate(context: ExtensionContext) {
 		sessionHistoryTreeProvider.refresh();
 	});
 
-	workspace.onDidChangeTextDocument(async (changeEvent: TextDocumentChangeEvent) => {
-		console.log("Saving");
+	const onChange = debounce(async (changeEvent: TextDocumentChangeEvent) => {
 		if (changeEvent) {
-			await changeEvent.document.save();
-		}
-		// if (changeEvent) {
-		// 	if (changeEvent.contentChanges.length === 0) {
-		// 		return;
-		// 	}
+			if (changeEvent.contentChanges.length === 0) {
+				return;
+			}
 			
-		// 	const workspaceFolder = getWorkspaceFolder(changeEvent.document.fileName);
-		// 	if (workspaceFolder) {
-		// 		await changeEvent.document.save();
-		// 		const filename = changeEvent.document.fileName;
-		// 		const content = changeEvent.document.getText();
-		// 		const rcs = await rcsProvider.getRCS(workspaceFolder);
-		// 		const currentSha = await rcs.getCurrentSha();
-		// 		const latest = await rcs.getLatestSha();
-		// 		console.log("current:", currentSha, "latest:", latest);
-		// 		if (currentSha === latest) {
-		// 			if (filename.indexOf(workspaceFolder) !== 0) {
-		// 				throw new Error("BLARGH");
-		// 			}
-		// 			const relativeFilename = filename.substring(workspaceFolder.length + 1);
-		// 			await rcs.pushChange(relativeFilename, content);
-		// 			sessionHistoryTreeProvider.refresh();
-		// 			console.log("saved change.")
-		// 		} else {
-		// 			console.log("did not save change.");
-		// 		}
-		// 	} else {
-		// 		window.showInformationMessage("Could not find workspace folder for " + 
-		// 			changeEvent.document.fileName);
-		// 	}
-		// } else {
-		// 	throw new Error("BLARGH");
-		// }
-	});
+			const workspaceFolder = getWorkspaceFolder(changeEvent.document.fileName);
+			if (workspaceFolder) {
+				await changeEvent.document.save();
+				const filename = changeEvent.document.fileName;
+				const content = changeEvent.document.getText();
+				const rcs = await rcsProvider.getRCS(workspaceFolder);
+				const currentSha = await rcs.getCurrentSha();
+				const latest = await rcs.getLatestSha();
+				console.log("current:", currentSha, "latest:", latest);
+				if (currentSha === latest) {
+					if (filename.indexOf(workspaceFolder) !== 0) {
+						throw new Error("BLARGH");
+					}
+					const relativeFilename = filename.substring(workspaceFolder.length + 1);
+					await rcs.pushChange(relativeFilename, content);
+					sessionHistoryTreeProvider.refresh();
+					console.log("saved change.")
+				} else {
+					console.log("did not save change.");
+				}
+			} else {
+				window.showInformationMessage("Could not find workspace folder for " + 
+					changeEvent.document.fileName);
+			}
+		} else {
+			throw new Error("BLARGH");
+		}
+	}, 300);
+
+	workspace.onDidChangeTextDocument(onChange);
 }
 
 export function deactivate() {}
