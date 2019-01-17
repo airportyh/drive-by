@@ -209,7 +209,7 @@ export function activate(context: ExtensionContext) {
 		sessionHistoryTreeProvider.refresh();
 	});
 
-	commands.registerCommand("driveBy.restoreTo", async (node: ChangeTreeNode) => {
+	commands.registerCommand("driveBy.restore", async (node: ChangeTreeNode) => {
 		const rcs = await rcsProvider.getRCS(folderPath(node.folder));
 		await rcs.restoreChange(node.change.sha);
 		sessionHistoryTreeProvider.refresh();

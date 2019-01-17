@@ -1,0 +1,65 @@
+{
+	"name": "drive-by",
+	"displayName": "Drive By",
+	"description": "VS Code plugin that records and plays back coding sessions",
+	"version": "0.0.1",
+	"publisher": "airportyh",
+	"enableProposedApi": true,
+	"engines": {
+		"vscode": "^1.25.0"
+	},
+	"categories": [
+		"Other"
+	],
+	"activationEvents": [
+		"*"
+	],
+	"main": "./out/extension.js",
+	"contributes": {
+		"views": {
+			"explorer": [
+				{
+					"id": "session-history",
+					"name": "Change Log"
+				}
+			]
+		},
+		"commands": [
+			{
+				"command": "driveBy.refresh",
+				"title": "Drive By: Refresh"
+			},
+			{
+				"command": "driveBy.restore",
+				"title": "Drive By: Restore"
+			}
+		]
+	},
+	"scripts": {
+		"vscode:prepublish": "npm run compile",
+		"compile": "tsc -p ./",
+		"watch": "tsc -watch -p ./",
+		"postinstall": "node ./node_modules/vscode/bin/install"
+	},
+	"devDependencies": {
+		"@types/mkdirp": "^0.5.2",
+		"@types/node": "*",
+		"@types/rimraf": "^2.0.2",
+		"tslint": "^5.11.0",
+		"typescript": "^2.1.4",
+		"vscode": "^1.1.22"
+	},
+	"dependencies": {
+		"@types/lodash": "^4.14.119",
+		"@types/mkdirp-promise": "^5.0.0",
+		"@types/mz": "0.0.32",
+		"@types/rmfr": "^2.0.0",
+		"@types/sha1": "^1.1.1",
+		"lodash": "^4.17.11",
+		"mkdirp-promise": "^5.0.1",
+		"moment": "^2.23.0",
+		"mz": "^2.7.0",
+		"rmfr": "^2.0.0",
+		"sha1": "^1.1.1"
+	}
+}
