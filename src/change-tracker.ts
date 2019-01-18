@@ -2,7 +2,7 @@ const sha1 = require("sha1");
 const mkdirp = require("mkdirp-promise");
 import * as path from "path";
 import * as fs from "mz/fs";
-import { difference } from "lodash";
+import { difference, union } from "lodash";
 import * as rmfr from "rmfr";
 
 // Reference: https://blog.thoughtram.io/git/2014/11/18/the-anatomy-of-a-git-commit.html#whats-up-with-those-long-revision-names
@@ -36,7 +36,7 @@ export interface TreeEntry {
     sha: string;
 }
 
-export async function createTracker(rootDir: string): Promise<ChangeTracker> {
+export async function createChangeTracker(rootDir: string): Promise<ChangeTracker> {
     const tracker = new ChangeTracker(rootDir);
     await tracker.initialize();
     return tracker;
@@ -68,6 +68,54 @@ export class ChangeTracker {
         } else {
             return null;
         }
+    }
+
+    public async getChangedFile(sha: string): Promise<string | null> {
+        const change = await this.fetchChange(sha);
+        const tree = await this.fetchTree(change.rootTreeSha);
+        let prevTree;
+        if (change.parentSha) {
+            const prevChange = await this.fetchChange(change.parentSha);
+            prevTree = await this.fetchTree(prevChange.rootTreeSha);
+            
+        } else {
+            prevTree = {};
+        }
+        return await this.findFileThatChanged(["."], prevTree, tree);
+    }
+
+    public async findFileThatChanged(dirPath: string[], prevTree: Tree, tree: Tree): Promise<string | null> {
+        const allKeys = union(Object.keys(prevTree), Object.keys(tree));
+        for (let entryName of allKeys) {
+            const prevEntry = prevTree[entryName];
+            const newEntry = tree[entryName];
+            if (newEntry && !prevEntry) {
+                if (newEntry.type === "blob") {
+                    return path.join(...dirPath, entryName);
+                } else if (newEntry.type === "tree") {
+                    const newSubTree = await this.fetchTree(newEntry.sha);
+                    return this.findFileThatChanged([...dirPath, entryName], {}, newSubTree);
+                } else {
+                    throw new Error("BLARGH");
+                }
+            }
+            if (!newEntry && prevEntry) {
+                throw new Error("Not implemented yet.");
+            }
+            if (newEntry && prevEntry && prevEntry.sha !== newEntry.sha) {
+                if (prevEntry.type === "blob" && newEntry.type === "blob") {
+                    return path.join(...dirPath, entryName);
+                } else if (prevEntry.type === "tree" && newEntry.type === "tree") {
+                    const prevSubTree = await this.fetchTree(prevEntry.sha);
+                    const newSubTree = await this.fetchTree(newEntry.sha);
+                    return this.findFileThatChanged([...dirPath, entryName], prevSubTree, newSubTree);
+                } else {
+                    throw new Error("BLARGH");
+                }
+            }
+        
+        }
+        return null;
     }
 
     public async pushChangeOnParent(

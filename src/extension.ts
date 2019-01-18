@@ -91,6 +91,10 @@ class MyRCS {
 		}
 	}
 
+	async getChangedFile(sha: string): Promise<string | null> {
+		return this.tracker.getChangedFile(sha);
+	}
+
 	async restoreChange(sha: string): Promise<void> {
 		await this.processJob(() => this.tracker.restoreChange(sha));
 	}
@@ -202,7 +206,6 @@ class SessionHistoryTreeProvider implements TreeDataProvider<TreeNode> {
 }
 
 export function activate(context: ExtensionContext) {
-	window.showInformationMessage("TOBY WAS HERE");
 	const rcsProvider: RCSProvider = new RCSProvider();
 	const sessionHistoryTreeProvider = new SessionHistoryTreeProvider(rcsProvider);
 	window.registerTreeDataProvider("session-history", sessionHistoryTreeProvider);
@@ -213,6 +216,11 @@ export function activate(context: ExtensionContext) {
 	commands.registerCommand("driveBy.restore", async (node: ChangeTreeNode) => {
 		const rcs = await rcsProvider.getRCS(folderPath(node.folder));
 		await rcs.restoreChange(node.change.sha);
+		const filePath = await rcs.getChangedFile(node.change.sha);
+		if (filePath) {
+			const uri = Uri.file(path.join(folderPath(node.folder), filePath))
+			window.showTextDocument(uri);
+		}
 		sessionHistoryTreeProvider.refresh();
 	});
 
