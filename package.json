@@ -19,7 +19,7 @@
 		"views": {
 			"explorer": [
 				{
-					"id": "session-history",
+					"id": "change-log",
 					"name": "Change Log"
 				}
 			]
