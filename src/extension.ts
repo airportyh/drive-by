@@ -1,8 +1,11 @@
 // TODO: https://stackoverflow.com/questions/1386291/git-git-dir-not-working-as-expected
 
-import { workspace, ExtensionContext, TextDocumentChangeEvent, window, commands, TreeDataProvider } from 'vscode';
+import { workspace, ExtensionContext, TextDocumentChangeEvent, window, commands, TreeDataProvider, WorkspaceFolder, EventEmitter, Event, TreeItem, TreeItemCollapsibleState, Uri } from 'vscode';
 import { debounce } from "lodash";
-import { child_process, fs } from "mz";
+import { getHead, getMasterChangeLog, getStatus, getMasterHead, reset, restoreToHead, restoreCommit, save, isGitInitialized, ensureGitInitialized, getChangedFiles } from "./git-helpers";
+import { ChangeLogTreeProvider, ChangeTreeNode } from './change-log-tree-provider';
+import { delay } from './delay';
+import { JobQueue } from './job-queue';
 import * as path from "path";
 
 function getWorkspaceFolder(filePath: string): string | null {
@@ -18,116 +21,197 @@ function getWorkspaceFolder(filePath: string): string | null {
 	return null;
 }
 
-
-class ChangeLogTreeProvider implements TreeDataProvider<TreeNode> {
-
-	private changeEmitter: EventEmitter<TreeNode | undefined> = new EventEmitter<TreeNode | undefined>();
-	readonly onDidChangeTreeData: Event<TreeNode | undefined | null> = this.changeEmitter.event;
-	
-	constructor(private rcsProvider: RCSProvider) {}
-
-	refresh(): void {
-		this.changeEmitter.fire();
-	}
-
-	getTreeItem(node: TreeNode): TreeItem {
-		if (node.type === "change") {
-			const label = moment(node.change.timestamp).calendar() + 
-			" - " + node.change.sha.substring(0, 6) + "...";
-			const item = new TreeItem(label,
-				TreeItemCollapsibleState.None);
-			if (node.isLatest) {
-				item.iconPath = Uri.file(path.join(__filename, "..", "..", "media", "latest.svg"));
-			}
-			if (node.isCurrent) {
-				item.iconPath = Uri.file(path.join(__filename, "..", "..", "media", "current.svg"));
-			}
-			return item;
-		} else if (node.type === "folder") {
-			return new TreeItem(node.folder.name, TreeItemCollapsibleState.Expanded);
-		} else {
-			throw new Error("Unknown node type: " + node["type"]);
-		}
-	}
-
-	async getChildren(node?: TreeNode): Promise<TreeNode[]> {
-		if (!node) {
-			const folders = workspace.workspaceFolders;
-			if (!folders) {
-				return [];
-			}
-			return folders.map((folder) => {
-				return { type: "folder", folder } as TreeNode;
-			});
-		} else if (node.type === "folder") {
-			const rcs = await this.rcsProvider.getRCS(folderPath(node));
-			const changeLog = await rcs.getChangeLog();
-			const latest = await rcs.getLatestSha();
-			const current = await rcs.getCurrentSha();
-			return changeLog.map((change) => {
-				return <ChangeTreeNode>{
-					type: "change",
-					isCurrent: change.sha === current,
-					isLatest: change.sha === latest,
-					change: change,
-					folder: node
-				};
-			});
-		} else if (node.type === "change") {
-			return [];
-		} else {
-			return [];
-		}
-	}
-}
-
 export function activate(context: ExtensionContext) {
+	const jobQueue = new JobQueue();
 	const treeProvider = new ChangeLogTreeProvider();
-	window.registerTreeDataProvider("change-log", treeProvider);
-	commands.registerCommand("driveBy.refresh", () => {
+	let state: string = "idle";
+	window.registerTreeDataProvider("driveBy", treeProvider);
+	commands.registerCommand("driveBy.refresh", errorHandler(() => {
 		treeProvider.refresh();
-	});
+	}));
 
-	workspace.onDidChangeWorkspaceFolders(() => {
-		
-	});
+	commands.registerCommand("driveBy.restore", asyncErrorHandler(async(node: ChangeTreeNode) => {
+		const folder = node.folder.folder.uri.fsPath;
+		if (folder) {
+			jobQueue.push(async () => {
+				doRestoreCommit(folder, node.sha);
+			});
+		}
+	}));
 
-	const onChange = debounce(async (changeEvent: TextDocumentChangeEvent) => {
+	commands.registerCommand("driveBy.toggleReplay", asyncErrorHandler(async() => {
+		// Currently only handling one workspace use-case. TODO: handle multiple workspaces
+		const workspaceFolder = workspace.workspaceFolders && workspace.workspaceFolders[0];
+		if (workspaceFolder) {
+			const folder = workspaceFolder.uri.fsPath;
+			await toggleReplay(folder);
+		}
+	}));
+
+	commands.registerCommand("driveBy.next", asyncErrorHandler(async() => {
+		// Currently only handling one workspace use-case. TODO: handle multiple workspaces
+		const workspaceFolder = workspace.workspaceFolders && workspace.workspaceFolders[0];
+		if (workspaceFolder) {
+			const folder = workspaceFolder.uri.fsPath;
+			state = "idle";
+			jobQueue.push(async () => {
+				const head = await getHead(folder);
+				if (!head) {
+					return;
+				}
+				const commits = await getMasterChangeLog(folder);
+				const idx = commits.indexOf(head);
+				if (idx === -1) {
+					throw new Error("BLARG");
+				}
+				if (idx + 1 < commits.length) {
+					const nextCommit = commits[idx + 1];
+					await doRestoreCommit(folder, nextCommit);
+				}
+			});
+		}
+	}));
+
+	commands.registerCommand("driveBy.previous", asyncErrorHandler(async() => {
+		// Currently only handling one workspace use-case. TODO: handle multiple workspaces
+		const workspaceFolder = workspace.workspaceFolders && workspace.workspaceFolders[0];
+		if (workspaceFolder) {
+			const folder = workspaceFolder.uri.fsPath;
+			state = "idle";
+			jobQueue.push(async () => {
+				const head = await getHead(folder);
+				if (!head) {
+					return;
+				}
+				const commits = await getMasterChangeLog(folder);
+				const idx = commits.indexOf(head);
+				if (idx === -1) {
+					throw new Error("BLARG");
+				}
+				if (idx - 1 >= 0) {
+					const previousCommit = commits[idx - 1];
+					await doRestoreCommit(folder, previousCommit);
+				}
+			});
+		}
+	}));
+
+	workspace.onDidChangeWorkspaceFolders(errorHandler(() => {
+		treeProvider.refresh();
+	}));
+
+	const onChange = debounce(asyncErrorHandler(async (changeEvent: TextDocumentChangeEvent) => {
 		if (changeEvent) {
 			const document = changeEvent.document;
 			const filePath = document.uri.fsPath;
 			const folder = getWorkspaceFolder(filePath);
 			if (folder) {
-				await document.save();
-				await save(folder);
+				jobQueue.push(async () => {
+					await document.save();
+					await doSave(folder);
+				});
 			} else {
 				window.showInformationMessage("No workspace found.");
 			}
 		} else {
 			throw new Error("BLARGH");
 		}
-	}, 500);
+	}), 500);
+
+	async function doSave(workingDir: string) {
+		const gitInitialized = await isGitInitialized(workingDir);
+		if (!gitInitialized) {
+			await ensureGitInitialized(workingDir);
+		}
+		const masterHead = await getMasterHead(workingDir);
+		const head = await getHead(workingDir);
+		
+		if (masterHead === head) {
+			await save(workingDir);
+		}
+		treeProvider.refresh();
+	}
+
+	
 
 	workspace.onDidChangeTextDocument(onChange);
+	window.onDidChangeActiveTextEditor((editor) => {
+		if (editor) {
+			const filePath = editor.document.uri.fsPath;
+			const folder = getWorkspaceFolder(filePath);
+			if (folder) {
+				jobQueue.push(() => doSave(folder));
+			}
+		}
+	});
+
+	async function toggleReplay(folder: string) {
+		if (state === "replay") {
+			state = "idle";
+		} else {
+			jobQueue.push(() => replay(folder));
+		}
+	}
+
+	async function replay(folder: string) {
+		const head = await getHead(folder);
+		if (!head) {
+			return;
+		}
+		const commits = await getMasterChangeLog(folder);
+		let idx = commits.indexOf(head);
+		if (idx === -1) {
+			throw new Error("BLARG");
+		}
+		state = "replay";
+		idx++;
+		while (idx < commits.length) {
+			const commit = commits[idx];
+			
+			await doRestoreCommit(folder, commit);
+			await delay(200);
+		
+			if (state === "idle") {
+				break;
+			}
+			idx++;
+		}
+		state = "idle";
+	}
+
+	async function doRestoreCommit(workingDir: string, sha: string): Promise<void> {
+		await reset(workingDir);
+		const head = await getMasterHead(workingDir);
+		await restoreCommit(workingDir, sha);
+		treeProvider.refresh();
+		const changedFiles = await getChangedFiles(workingDir, sha);
+		if (changedFiles.length === 1) {
+			window.showTextDocument(Uri.file(path.join(workingDir, changedFiles[0])));
+		}
+	}
 }
 
-async function save(workingDir: string): Promise<void> {
-	const options = {
-		cwd: workingDir
+
+function errorHandler(fn: (...args) => any): () => any {
+	return (...args) => {
+		try {
+			return fn(...args);
+		} catch (e) {
+			console.log(e.stack);
+			window.showInformationMessage(e.message);
+		}
+	}
+}
+
+function asyncErrorHandler(fn: (...args) => Promise<any>): () => Promise<any> {
+	return async (...args) => {
+		try {
+			await fn(...args);
+		} catch (e) {
+			console.log(e.stack);
+			window.showInformationMessage(e.message);
+		}
 	};
-	await ensureGitInitialized(workingDir);
-	await child_process.exec("git add .", options);
-	await child_process.exec("git commit -m 'Update by Drive By.'", options);
-}
-
-async function ensureGitInitialized(workingDir: string) {
-    try {
-        const stat = await fs.stat(path.join(workingDir, ".git"));
-    } catch (e) {
-        await child_process.exec("git init", {
-			cwd: workingDir
-		});
-    }
 }
 
 export function deactivate() {}

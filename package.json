@@ -19,7 +19,7 @@
 		"views": {
 			"explorer": [
 				{
-					"id": "change-log",
+					"id": "driveBy",
 					"name": "Change Log"
 				}
 			]
@@ -31,7 +31,42 @@
 			},
 			{
 				"command": "driveBy.restore",
-				"title": "Drive By: Restore"
+				"title": "Restore"
+			},
+			{
+				"command": "driveBy.next",
+				"title": "Next"
+			},
+			{
+				"command": "driveBy.previous",
+				"title": "Previous"
+			},
+			{
+				"command": "driveBy.toggleReplay",
+				"title": "Toggle Replay"
+			}
+		],
+		"menus": {
+			"view/item/context": [
+				{
+					"command": "driveBy.restore",
+					"group": "inline",
+					"when": "viewItem == change"
+				}
+			]
+		},
+		"keybindings": [
+			{
+				"command": "driveBy.next",
+				"key": "alt-ctrl-right"
+			},
+			{
+				"command": "driveBy.previous",
+				"key": "alt-ctrl-left"
+			},
+			{
+				"command": "driveBy.toggleReplay",
+				"key": "alt-ctrl-space"
 			}
 		]
 	},
