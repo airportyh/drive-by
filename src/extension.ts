@@ -27,16 +27,18 @@ export function activate(context: ExtensionContext) {
 	let state: string = "idle";
 	window.registerTreeDataProvider("driveBy", treeProvider);
 	commands.registerCommand("driveBy.refresh", errorHandler(() => {
-		treeProvider.refresh();
+		refresh();
 	}));
 
 	commands.registerCommand("driveBy.restore", asyncErrorHandler(async(node: ChangeTreeNode) => {
-		const folder = node.folder.folder.uri.fsPath;
-		if (folder) {
-			jobQueue.push(async () => {
-				doRestoreCommit(folder, node.sha);
-			});
+		if (!node) {
+			window.showInformationMessage("Warning: no changed node for a restore");
+			return;
 		}
+		const folder = node.folder;
+		jobQueue.push(async () => {
+			doRestoreCommit(folder, node.sha);
+		});
 	}));
 
 	commands.registerCommand("driveBy.toggleReplay", asyncErrorHandler(async() => {
@@ -59,7 +61,8 @@ export function activate(context: ExtensionContext) {
 				if (!head) {
 					return;
 				}
-				const commits = await getMasterChangeLog(folder);
+				const commits = (await getMasterChangeLog(folder))
+					.map((commit) => commit.sha);
 				const idx = commits.indexOf(head);
 				if (idx === -1) {
 					throw new Error("BLARG");
@@ -83,7 +86,8 @@ export function activate(context: ExtensionContext) {
 				if (!head) {
 					return;
 				}
-				const commits = await getMasterChangeLog(folder);
+				const commits = (await getMasterChangeLog(folder))
+					.map((commit) => commit.sha);
 				const idx = commits.indexOf(head);
 				if (idx === -1) {
 					throw new Error("BLARG");
@@ -97,7 +101,7 @@ export function activate(context: ExtensionContext) {
 	}));
 
 	workspace.onDidChangeWorkspaceFolders(errorHandler(() => {
-		treeProvider.refresh();
+		refresh();
 	}));
 
 	const onChange = debounce(asyncErrorHandler(async (changeEvent: TextDocumentChangeEvent) => {
@@ -129,7 +133,7 @@ export function activate(context: ExtensionContext) {
 		if (masterHead === head) {
 			await save(workingDir);
 		}
-		treeProvider.refresh();
+		refresh();
 	}
 
 	
@@ -158,7 +162,8 @@ export function activate(context: ExtensionContext) {
 		if (!head) {
 			return;
 		}
-		const commits = await getMasterChangeLog(folder);
+		const commits = (await getMasterChangeLog(folder))
+			.map((commit) => commit.sha);
 		let idx = commits.indexOf(head);
 		if (idx === -1) {
 			throw new Error("BLARG");
@@ -183,11 +188,15 @@ export function activate(context: ExtensionContext) {
 		await reset(workingDir);
 		const head = await getMasterHead(workingDir);
 		await restoreCommit(workingDir, sha);
-		treeProvider.refresh();
+		refresh();
 		const changedFiles = await getChangedFiles(workingDir, sha);
 		if (changedFiles.length === 1) {
 			window.showTextDocument(Uri.file(path.join(workingDir, changedFiles[0])));
 		}
+	}
+
+	function refresh() {
+		treeProvider.refresh();
 	}
 }
 
@@ -198,7 +207,7 @@ function errorHandler(fn: (...args) => any): () => any {
 			return fn(...args);
 		} catch (e) {
 			console.log(e.stack);
-			window.showInformationMessage(e.message);
+			window.showInformationMessage(e.stack);
 		}
 	}
 }
@@ -209,7 +218,7 @@ function asyncErrorHandler(fn: (...args) => Promise<any>): () => Promise<any> {
 			await fn(...args);
 		} catch (e) {
 			console.log(e.stack);
-			window.showInformationMessage(e.message);
+			window.showInformationMessage(e.stack);
 		}
 	};
 }
