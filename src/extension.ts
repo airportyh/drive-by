@@ -2,8 +2,8 @@
 
 import { workspace, ExtensionContext, TextDocumentChangeEvent, window, commands, TreeDataProvider, WorkspaceFolder, EventEmitter, Event, TreeItem, TreeItemCollapsibleState, Uri, Terminal, Disposable, TerminalRenderer } from 'vscode';
 import { debounce } from "lodash";
-import { getHead, getMasterHead, reset, restoreToHead, restoreCommit, save, isGitInitialized, ensureGitInitialized, getChangedFiles, getCommitShas } from "./git-helpers";
-import { ChangeLogTreeProvider, ChangeTreeNode } from './change-log-tree-provider';
+import { getHead, getMasterHead, reset, restoreCommit, save, isGitInitialized, ensureGitInitialized, getTop5ChangedFiles, getCommitShas } from "./git-helpers";
+import { ChangeLogTreeProvider, CommitTreeNode } from './change-log-tree-provider';
 import { delay } from './delay';
 import { JobQueue } from './job-queue';
 import * as path from "path";
@@ -34,6 +34,7 @@ function getWorkspaceFolder(filePath: string): string | null {
 }
 
 export function activate(context: ExtensionContext) {
+	// Initialiation
 	let saveRefCount = 0;
 	const jobQueue = new JobQueue();
 	let terminalBufferData = "";
@@ -41,82 +42,38 @@ export function activate(context: ExtensionContext) {
 	let activeTerminalListener: Disposable | undefined;
 	let state: string = "idle";
 	let terminalRenderer: TerminalRenderer;
-	window.registerTreeDataProvider("driveBy", treeProvider);
+	const treeView = window.createTreeView("driveBy", { treeDataProvider: treeProvider });
 	errorHandler(createCustomTerminal)();
 	trackTerminals();
-
-	function createCustomTerminal() {
-		terminalRenderer = window.createTerminalRenderer('Replay Term');
-		terminalRenderer.onDidAcceptInput((input) => {
-			terminalRenderer.write("\rDon't type in here. This is a replay terminal!")
-		});
-		terminalRenderer.terminal.show();
-	}
-
-	function trackTerminals() {
-		if (window.activeTerminal) {
-			activeTerminalListener = registerTerminal(window.activeTerminal);
-		}
-		window.onDidChangeActiveTerminal((terminal) => {
-			if (activeTerminalListener) {
-				activeTerminalListener.dispose();
-			}
-			if (terminal) {
-				activeTerminalListener = registerTerminal(terminal);
-			}
-		});
-	}
-
 	const debouncedDoSaveWithTerminalData = debounce(doSaveWithTerminalData, 250);
+	commands.registerCommand("driveBy.refresh", asyncErrorHandler(refresh));
+	commands.registerCommand("driveBy.restore", asyncErrorHandler(restore));
+	commands.registerCommand("driveBy.toggleReplay", asyncErrorHandler(toggleReplayCommand));
+	commands.registerCommand("driveBy.next", asyncErrorHandler(next));
+	commands.registerCommand("driveBy.previous", asyncErrorHandler(previous));
+	commands.registerCommand("driveBy.nextEdit", asyncErrorHandler(nextEdit));
+	workspace.onDidChangeWorkspaceFolders(asyncErrorHandler(refresh));
+	const onChange = debounce(asyncErrorHandler(onChangeDocument), 500);
+	workspace.onDidChangeTextDocument(onChange);
+	window.onDidChangeActiveTextEditor(asyncErrorHandler(onChangeActiveTextEditor));
 
 	function registerTerminal(terminal: Terminal): Disposable {
 		return terminal.onDidWriteData(async (data: string) => {
-			// window.showInformationMessage("terminal: " + data);
 			terminalBufferData += data;
 			debouncedDoSaveWithTerminalData();
-			// window.showInformationMessage("terminal:" + JSON.stringify(data));
-			// if (data === "\r\n") {
-			// 	// they issued a command
-			// 	window.showInformationMessage("You issued command: " + currentCommand);
-			// 	currentCommand = "";
-			// } else if (data.match(/\r\n/)) {
-			// 	// this is the reply by the command
-			// 	// this may not be true if process progressively
-			// 	// prints characters
-			// 	window.showInformationMessage("Process replied: " + data);
-			// 	const folder = getFirstWorkspaceFolder();
-			// 	if (folder) {
-			// 		await doSave(folder);
-			// 	}
-			// } else {
-			// 	currentCommand += data;
-			// }
 		});
 	}
 
-	commands.registerCommand("driveBy.refresh", errorHandler(() => {
-		refresh();
-	}));
-
-	commands.registerCommand("driveBy.restore", asyncErrorHandler(async(node: ChangeTreeNode) => {
-		if (!node) {
-			window.showInformationMessage("Warning: no changed node for a restore");
-			return;
-		}
-		const folder = node.folder;
-		await jobQueue.push(async () => doRestoreCommit(folder, node.sha));
-	}));
-
-	commands.registerCommand("driveBy.toggleReplay", asyncErrorHandler(async() => {
+	async function toggleReplayCommand() {
 		// Currently only handling one workspace use-case. TODO: handle multiple workspaces
 		const workspaceFolder = workspace.workspaceFolders && workspace.workspaceFolders[0];
 		if (workspaceFolder) {
 			const folder = workspaceFolder.uri.fsPath;
 			await toggleReplay(folder);
 		}
-	}));
+	}
 
-	commands.registerCommand("driveBy.next", asyncErrorHandler(async() => {
+	async function next() {
 		// Currently only handling one workspace use-case. TODO: handle multiple workspaces
 		const workspaceFolder = workspace.workspaceFolders && workspace.workspaceFolders[0];
 		if (workspaceFolder) {
@@ -138,9 +95,45 @@ export function activate(context: ExtensionContext) {
 				}
 			});
 		}
-	}));
+	}
 
-	commands.registerCommand("driveBy.previous", asyncErrorHandler(async() => {
+	async function nextEdit() {
+		const workspaceFolder = workspace.workspaceFolders && workspace.workspaceFolders[0];
+		if (workspaceFolder) {
+			const folder = workspaceFolder.uri.fsPath;
+			state = "idle";
+			await jobQueue.push(async () => {
+				const head = await getHead(folder);
+				if (!head) {
+					return;
+				}
+				const commits = await getCommitShas(folder);
+				let idx = commits.indexOf(head);
+				if (idx === -1) {
+					throw new Error("BLARG");
+				}
+				let nextCommit: null | string = null;
+				while (true) {
+					idx++;
+					if (idx >= commits.length) {
+						break;
+					}
+					const commit = treeProvider.getTreeNodeForCommit(folder, commits[idx]);
+					if (commit && !(commit.commit.changedFiles.length === 1 &&
+						commit.commit.changedFiles[0].fileName === TERMINAL_DATA_FILE_NAME)) {
+						nextCommit = commit.sha;
+						break;
+					}
+					
+				}
+				if (nextCommit) {
+					await doRestoreCommit(folder, nextCommit);
+				}
+			});
+		}
+	}
+
+	async function previous() {
 		// Currently only handling one workspace use-case. TODO: handle multiple workspaces
 		const workspaceFolder = workspace.workspaceFolders && workspace.workspaceFolders[0];
 		if (workspaceFolder) {
@@ -162,13 +155,9 @@ export function activate(context: ExtensionContext) {
 				}
 			});
 		}
-	}));
+	}
 
-	workspace.onDidChangeWorkspaceFolders(errorHandler(() => {
-		refresh();
-	}));
-
-	const onChange = debounce(asyncErrorHandler(async (changeEvent: TextDocumentChangeEvent) => {
+	async function onChangeDocument(changeEvent: TextDocumentChangeEvent) {
 		if (changeEvent) {
 			const document = changeEvent.document;
 			const filePath = document.uri.fsPath;
@@ -183,10 +172,9 @@ export function activate(context: ExtensionContext) {
 		} else {
 			throw new Error("BLARGH");
 		}
-	}), 500);
+	}
 
-	workspace.onDidChangeTextDocument(onChange);
-	window.onDidChangeActiveTextEditor(asyncErrorHandler(async (editor) => {
+	async function onChangeActiveTextEditor(editor) {
 		if (editor) {
 			const filePath = editor.document.uri.fsPath;
 			const folder = getWorkspaceFolder(filePath);
@@ -196,7 +184,37 @@ export function activate(context: ExtensionContext) {
 				});
 			}
 		}
-	}));
+	}
+
+	function createCustomTerminal() {
+		terminalRenderer = window.createTerminalRenderer('Replay Term');
+		terminalRenderer.onDidAcceptInput((input) => {
+			terminalRenderer.write("\rDon't type in here. This is a replay terminal!\r");
+		});
+		terminalRenderer.terminal.show();
+	}
+
+	function trackTerminals() {
+		if (window.activeTerminal) {
+			activeTerminalListener = registerTerminal(window.activeTerminal);
+		}
+		window.onDidChangeActiveTerminal((terminal) => {
+			if (activeTerminalListener) {
+				activeTerminalListener.dispose();
+			}
+			if (terminal) {
+				activeTerminalListener = registerTerminal(terminal);
+			}
+		});
+	}
+
+	async function restore(node: CommitTreeNode) {
+		if (!node) {
+			window.showInformationMessage("Warning: no changed node for a restore");
+			return;
+		}
+		await jobQueue.push(async () => doRestoreCommit(node.folder, node.sha));
+	}
 
 	async function toggleReplay(folder: string) {
 		if (state === "replay") {
@@ -236,7 +254,7 @@ export function activate(context: ExtensionContext) {
 		await reset(workingDir);
 		await restoreCommit(workingDir, sha);
 		refresh();
-		const changedFiles = await getChangedFiles(workingDir, sha);
+		const changedFiles = await getTop5ChangedFiles(workingDir, sha);
 		if (changedFiles.length === 1 && changedFiles[0] !== TERMINAL_DATA_FILE_NAME) {
 			window.showTextDocument(Uri.file(path.join(workingDir, changedFiles[0])));
 		}
@@ -244,6 +262,10 @@ export function activate(context: ExtensionContext) {
 		if (await fileExists(terminalDataFilePath)) {
 			const terminalData = (await fs.readFile(terminalDataFilePath)).toString();
 			terminalRenderer.write(terminalData);
+		}
+		const foundCommit = treeProvider.getTreeNodeForCommit(workingDir, sha);
+		if (foundCommit) {
+			treeView.reveal(foundCommit, { select: false });
 		}
 	}
 
@@ -279,16 +301,15 @@ export function activate(context: ExtensionContext) {
 				await beforeSave();
 			}
 			await save(workingDir);
+			await refresh();
 		}
-		refresh();
 		saveRefCount--;
 	}
 
-	function refresh() {
-		treeProvider.refresh();
+	async function refresh(): Promise<void> {
+		await treeProvider.refresh();
 	}
 }
-
 
 function errorHandler(fn: (...args) => any): () => any {
 	return (...args) => {

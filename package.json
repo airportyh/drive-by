@@ -38,6 +38,10 @@
 				"title": "Next"
 			},
 			{
+				"command": "driveBy.nextEdit",
+				"title": "Next Edit"
+			},
+			{
 				"command": "driveBy.previous",
 				"title": "Previous"
 			},
@@ -59,6 +63,10 @@
 			{
 				"command": "driveBy.next",
 				"key": "alt-ctrl-right"
+			},
+			{
+				"command": "driveBy.nextEdit",
+				"key": "alt-ctrl-shift-right"
 			},
 			{
 				"command": "driveBy.previous",

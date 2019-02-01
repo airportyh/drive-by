@@ -225,11 +225,11 @@ export async function isGitInitialized(workingDir: string) {
 	return directoryExists(path.join(workingDir, ".git"));
 }
 
-export async function getChangedFiles(workingDir: string, sha: string): Promise<string[]> {
+export async function getTop5ChangedFiles(workingDir: string, sha: string): Promise<string[]> {
 	const options = {
 		cwd: workingDir
 	};
-	const result = await exec(`git show ${sha} --pretty=format: --name-only`, options);
+	const result = await exec(`git show ${sha} --pretty=format: --name-only | head -5`, options);
 	const output = result[0].toString();
 	return output.split("\n").filter((line) => !!line);
 }
