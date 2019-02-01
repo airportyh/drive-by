@@ -86,16 +86,41 @@ export async function getHead(workingDir: string): Promise<string | null> {
 	}
 }
 
+export async function getCommit(workingDir: string, sha: string): Promise<Commit> {
+	const options = {
+		cwd: workingDir,
+		maxBuffer: 1000000000000
+	};
+	const result = await exec(`git show --compact-summary --no-color ${sha}`, options);
+	const output = result[0].toString();
+	const commits = parseCommitsSummary(output);
+	return commits[0];
+}
+
+export async function getCommitShas(workingDir: string): Promise<string[]> {
+	const options = {
+		cwd: workingDir,
+		maxBuffer: 1000000000000
+	};
+	const result = await exec(`git log --format=format:%H master`, options);
+	const output = result[0].toString();
+	return output.split("\n").reverse();
+}
+
 export async function getMasterChangeLog(workingDir: string): Promise<Commit[]> {
 	const options = {
-		cwd: workingDir
+		cwd: workingDir,
+		maxBuffer: 1000000000000
 	};
+	const start = new Date().getTime();
 	const result = await exec("git log --compact-summary --no-color master", options);
+	const end = new Date().getTime();
+	const elapsedTime = end - start;
 	const output = result[0].toString();
 	return parseCommitsSummary(output);
 }
 
-function parseCommitsSummary(output: string): Commit[] {
+export function parseCommitsSummary(output: string): Commit[] {
 	let state: "begin" | "author" | "date" | "message-begin" | "message-middle" | "fileset" | "end" = "begin";
 	const commits: Commit[] = [];
 	let commit: Partial<Commit> = {
@@ -104,12 +129,15 @@ function parseCommitsSummary(output: string): Commit[] {
 	};
 	const lines = output.split("\n");
 	for (let line of lines) {
-		console.log("state:", state, "line:", line);
 		if (state === "begin") {
 			const m = assertExists(line.match(/^commit ([a-z0-9]+)$/));
 			commit.sha = m[1];
 			state = "author";
 		} else if (state === "author") {
+			const m0 = line.match(/^Merge: .*$/);
+			if (m0) {
+				continue;
+			}
 			const m = assertExists(line.match(/^Author: (.*)$/));
 			commit.author = m[1];
 			state = "date";
@@ -134,28 +162,37 @@ function parseCommitsSummary(output: string): Commit[] {
 					changeDetail: m[2].trim()
 				});
 			} else {
-				commit.changeSummary = line.trim();
-				state = "end";
+				const m2 = line.match(/^commit ([a-z0-9]+)$/);
+				if (m2) {
+					acceptCommit();
+					commit.sha = m2[1];
+					state = "author";
+				} else {
+					commit.changeSummary = line.trim();
+					state = "end";
+				}
 			}
 		} else if (state === "end") {
 			if (line !== "") {
-				throw new Error("Empty line expected after change summary");
+				throw new Error("Empty line expected after change summary but got: " + line);
 			}
-			if (commit.sha && commit.author && commit.changedFiles && commit.changeSummary && commit.date && commit.message) {
-				commits.push(commit as Commit);
-				commit = {
-					message: "",
-					changedFiles: []
-				};
-			} else {
-				throw new Error("Incomplete information gathered for commit");
-			}
-			
+			acceptCommit();
 			state = "begin";
 		}
 	}
+	if (commit.sha) {
+		acceptCommit();
+	}
 	commits.reverse();
 	return commits;
+
+	function acceptCommit() {
+		commits.push(commit as Commit);
+		commit = {
+			message: "",
+			changedFiles: []
+		};
+	}
 }
 
 export async function save(workingDir: string): Promise<void> {
@@ -182,14 +219,6 @@ export async function ensureGitInitialized(workingDir: string) {
 			cwd: workingDir
 		});
     }
-}
-
-export async function status(workingDir: string) {
-	const options = {
-		cwd: workingDir
-	};
-	const result = await exec("git status", options);
-	console.log(result[0].toString());
 }
 
 export async function isGitInitialized(workingDir: string) {

@@ -1,7 +1,9 @@
-import { WorkspaceFolder, TreeDataProvider, EventEmitter, Event, TreeItem, TreeItemCollapsibleState, Uri, workspace, window } from "vscode";
-import { getHead, getMasterChangeLog, getStatus, isGitInitialized, Commit } from "./git-helpers";
+import { TreeDataProvider, EventEmitter, Event, TreeItem, TreeItemCollapsibleState, Uri, workspace, window } from "vscode";
+import { getMasterChangeLog, isGitInitialized, Commit, getCommitShas, getCommit, getHead, getStatus } from "./git-helpers";
 import * as path from "path";
 import { debounce } from "lodash";
+import { notEqual } from "assert";
+import { JobQueue } from "./job-queue";
 
 export type ChangeTreeNode = {
 	type: "change",
@@ -25,15 +27,17 @@ export class ChangeLogTreeProvider implements TreeDataProvider<TreeNode> {
 
 	private changeEmitter: EventEmitter<TreeNode | undefined> = new EventEmitter<TreeNode | undefined>();
 	readonly onDidChangeTreeData: Event<TreeNode | undefined | null> = this.changeEmitter.event;
-	private changesCache: _.Dictionary<ChangeTreeNode[]> = {};
+	private commitsCache: _.Dictionary<Commit[]> = {};
+	private head: string | null = null;
+	private status: string | null = null;
 	public refresh: () => Promise<void>;
 
-	constructor() {
+	constructor(private jobQueue: JobQueue) {
 		this.refresh = debounce(() => this.doRefresh(), 250);
 	}
 
 	async doRefresh(): Promise<void> {
-		for (let folder in this.changesCache) {
+		for (let folder in this.commitsCache) {
 			await this.loadChangesForFolder(folder);
 		}
 		this.changeEmitter.fire();
@@ -41,7 +45,7 @@ export class ChangeLogTreeProvider implements TreeDataProvider<TreeNode> {
 
 	getTreeItem(node: TreeNode): TreeItem {
 		if (node.type === "change") {
-			const item = new TreeItem(getChangeNodeDisplay(node), TreeItemCollapsibleState.None);
+			const item = new TreeItem(this.getChangeNodeDisplay(node), TreeItemCollapsibleState.None);
 			if (node.isLatest) {
 				item.iconPath = Uri.file(path.join(__filename, "..", "..", "media", "latest.svg"));
 			}
@@ -72,7 +76,20 @@ export class ChangeLogTreeProvider implements TreeDataProvider<TreeNode> {
 			});
 		} else if (node.type === "folder") {
 			await this.ensureChangesLoadedForFolder(node.folderPath);
-			return this.changesCache[node.folderPath];
+			const folder = node.folderPath;
+			const modified = this.status && !!this.status.match(/modified\:/);
+			const commits =  this.commitsCache[folder];
+			return commits.map((commit, idx) => {
+				return {
+					type: "change",
+					sha: commit.sha,
+					commit: commit,
+					folder: folder,
+					isCurrent: this.head && this.head === commit.sha,
+					isLatest: idx === commits.length - 1,
+					isModified: this.head && this.head === commit.sha && modified
+				} as ChangeTreeNode;
+			});
 		} else if (node.type === "change") {
 			return [];
 		} else {
@@ -81,48 +98,53 @@ export class ChangeLogTreeProvider implements TreeDataProvider<TreeNode> {
 	}
 
 	async ensureChangesLoadedForFolder(folder: string): Promise<void> {
-		if (this.changesCache[folder]) {
+		if (this.commitsCache[folder]) {
 			return;
 		}
 		await this.loadChangesForFolder(folder);
 	}
 
 	async loadChangesForFolder(folder: string): Promise<void> {
-		let changes: ChangeTreeNode[] = [];
 		if (await isGitInitialized(folder)) {
-			const head = await getHead(folder);
-			const commits = await getMasterChangeLog(folder);
-			const status = await getStatus(folder);
-			const modified = !!status.match(/modified\:/);
-			const end = new Date().getTime();
-			changes = commits.map((commit, idx) => {
-				return {
-					type: "change",
-					sha: commit.sha,
-					commit: commit,
-					folder: folder,
-					isCurrent: head === commit.sha,
-					isLatest: idx === commits.length - 1,
-					isModified: head === commit.sha && modified
-				} as ChangeTreeNode;
+			await this.jobQueue.push(async () => {
+				this.head = await getHead(folder);
+				this.status = await getStatus(folder);
+				if (!this.commitsCache[folder]) {
+					const commits = await getMasterChangeLog(folder)
+					this.commitsCache[folder] = commits;
+				} else {
+				
+					// only fetch the unfetched ones
+					const shas = await getCommitShas(folder);
+					const commits = this.commitsCache[folder];
+					const existingCommitShas = commits.map(commit => commit.sha);
+					const shasToFetch = shas.filter((sha) => {
+						return existingCommitShas.indexOf(sha) === -1;
+					});
+					for (let sha of shasToFetch) {
+						const commit = await getCommit(folder, sha);
+						commits.push(commit);
+					}
+				
+				}
 			});
 		} else {
-			changes = [];
+			this.commitsCache[folder] = [];
 		}
-		this.changesCache[folder] = changes;
+	}
+
+	getChangeNodeDisplay(node: ChangeTreeNode): string {
+		let display;
+		if (node.commit.changedFiles.length === 1) {
+			const file = node.commit.changedFiles[0];
+			display = file.fileName + " | " + file.changeDetail;
+		} else {
+			display = node.commit.changeSummary || node.commit.message || node.sha;
+		}
+		if (node.isModified) {
+			display = "~" + display;
+		}
+		return display;
 	}
 }
 
-function getChangeNodeDisplay(node: ChangeTreeNode): string {
-	let display;
-	if (node.commit.changedFiles.length === 1) {
-		const file = node.commit.changedFiles[0];
-		display = file.fileName + " | " + file.changeDetail;
-	} else {
-		display = node.commit.changeSummary;
-	}
-	if (node.isModified) {
-		display = "~" + display;
-	}
-	return display;
-}
