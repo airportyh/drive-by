@@ -1,0 +1,8 @@
+TODO
+
+* job queue overload if holding down the right arrow,
+ and then get Element with id 02dda63bb67175e99ece3fc1576fc57972360896 is already registered error
+* work on different branches
+* handle no workspace gracefully
+* don't track the replay terminal, that's dum
+* handle changing workspace gracefully

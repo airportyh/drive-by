@@ -25,16 +25,11 @@ export async function getStatus(workingDir: string): Promise<string> {
 	return result[0];
 }
 
-export async function restoreCommit(workingDir: string, sha: string): Promise<void> {
+export async function restoreToCommitSha(workingDir: string, sha: string): Promise<void> {
 	const options = {
 		cwd: workingDir
 	};
-	const head = await getMasterHead(workingDir);
-	if (head === sha) {
-		await restoreToHead(workingDir);
-	} else {
-		await exec(`git checkout ${sha}`, options);
-	}
+	await exec(`git checkout ${sha} -f`, options);
 }
 
 export async function reset(workingDir: string): Promise<void> {
@@ -48,7 +43,7 @@ export async function restoreToHead(workingDir: string): Promise<void> {
 	const options = {
 		cwd: workingDir
 	};
-	await exec("git checkout master", options);
+	await exec("git checkout master -f", options);
 }
 
 export async function getMasterHead(workingDir: string): Promise<string | null> {
@@ -107,17 +102,25 @@ export async function getCommitShas(workingDir: string): Promise<string[]> {
 	return output.split("\n").reverse();
 }
 
-export async function getMasterChangeLog(workingDir: string): Promise<Commit[]> {
+export async function getMasterChangeLog(workingDir: string): Promise<Commit[] | null> {
 	const options = {
 		cwd: workingDir,
 		maxBuffer: 1000000000000
 	};
 	const start = new Date().getTime();
-	const result = await exec("git log --compact-summary --no-color master", options);
-	const end = new Date().getTime();
-	const elapsedTime = end - start;
-	const output = result[0].toString();
-	return parseCommitsSummary(output);
+	try {
+		const result = await exec("git log --compact-summary --no-color master", options);
+		const end = new Date().getTime();
+		const elapsedTime = end - start;
+		const output = result[0].toString();
+		return parseCommitsSummary(output);
+	} catch (e) {
+		if (e.message.match(/ambiguous argument \'master\'/)) {
+			return null;
+		} else {
+			throw e;
+		}
+	}
 }
 
 export function parseCommitsSummary(output: string): Commit[] {
@@ -195,16 +198,17 @@ export function parseCommitsSummary(output: string): Commit[] {
 	}
 }
 
-export async function save(workingDir: string): Promise<void> {
+export async function save(workingDir: string): Promise<boolean> {
 	const options = {
 		cwd: workingDir
 	};
 	await exec("git add .", options);
 	try {
 		await exec("git commit -m 'Update by Drive By.'", options);
+		return true;
 	} catch (e) {
 		if (e.message.match(/nothing to commit/)) {
-			return;
+			return false;
 		} else {
 			throw e;
 		}
@@ -219,6 +223,12 @@ export async function ensureGitInitialized(workingDir: string) {
 			cwd: workingDir
 		});
     }
+}
+
+export async function initializeGitRepo(workingDir: string): Promise<void> {
+	await exec("git init", {
+		cwd: workingDir
+	});
 }
 
 export async function isGitInitialized(workingDir: string) {
