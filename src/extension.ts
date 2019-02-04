@@ -3,7 +3,6 @@ import { debounce } from "lodash";
 import { GitLogTreeProvider } from './git-log-tree-provider';
 import * as path from "path";
 import { fs } from "mz";
-import { fileExists } from './fs-helpers';
 import { GitRepo } from './git-repo';
 import { Commit } from './git-helpers';
 
@@ -144,12 +143,8 @@ export function activate(context: ExtensionContext) {
 
 	async function restore(commit: Commit): Promise<void> {
 		if (commit) {
-			console.log(new Date().getTime() % 600000);
 			await repo.restoreCommit(commit.sha);
-			console.log(new Date().getTime() % 600000);
 			await postRestoreCommit();
-			const end = new Date().getTime();
-			console.log(new Date().getTime() % 600000);
 		}
 	}
 

@@ -15,6 +15,7 @@ export class GitLogTreeProvider implements TreeDataProvider<Commit> {
 	constructor(private repo: GitRepo) {
 		this.subscription = this.repo.state$.subscribe((state) => {
 			if (this.repoState) {
+				// TODO: clean up
 				const prevHead = this.repoState.head;
 				const prevMasterHead = this.repoState.masterHead;
 				const prevCommits = this.repoState.commits;
@@ -74,7 +75,6 @@ export class GitLogTreeProvider implements TreeDataProvider<Commit> {
 
 	public async getChildren(node?: Commit): Promise<Commit[]> {
 		if (!node) {
-			console.log("shas", this.repoState.shas);
 			const commits = this.repoState.shas
 				.map((sha) => this.repoState.commits[sha]);
 			return commits;

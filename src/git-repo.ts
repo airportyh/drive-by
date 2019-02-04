@@ -1,8 +1,6 @@
 import { Commit, isGitInitialized, getHead, getStatus, getMasterChangeLog, getCommitShas, getCommit, reset, getMasterHead, initializeGitRepo, save, restoreToHead, restoreToCommitSha } from "./git-helpers";
 import _ = require("lodash");
-import { BehaviorSubject, Observable, ReplaySubject } from "rxjs";
-import { map } from "rxjs/operators";
-import { set } from "lodash/fp";
+import { BehaviorSubject, Observable } from "rxjs";
 import { JobQueue } from "./job-queue";
 
 export type GitRepoState = {
@@ -139,27 +137,6 @@ export class GitRepo {
     public get head(): string | null {
         return this.state.head;
     }
-    
-    // async incrementalUpdate(folder: string): Promise<void> {
-    //     await this.queue.push(async () => {
-    //         const [head, status, shas] = await Promise.all([
-    //             getHead(folder),
-    //             getStatus(folder),
-    //             getCommitShas(folder)
-    //         ]);
-    //         this.setHead(head);
-    //         this.setStatus(status);
-    //         // TODO notify of status changes
-    //         // Usually there should be only 1 new commit, not bothering
-    //         // to parallelize.
-    //         const commits = this.subject$.value.commits;
-    //         const shasToFetch = shas.filter((sha) => !(sha in commits));
-    //         for (let sha of shasToFetch) {
-    //             const commit = await getCommit(folder, sha);
-    //             this.addCommit(commit);
-    //         }
-    //     });
-    // }
 
     async getModified(): Promise<boolean> {
         const status = await getStatus(this.workingDir);
