@@ -42,7 +42,6 @@ export function activate(context: ExtensionContext) {
 		treeView = window.createTreeView("driveBy", { treeDataProvider: treeProvider });
 		createCustomTerminal();
 		trackTerminals();
-		trackTerminals();
 		debouncedDoSaveWithTerminalData = debounce(doSaveWithTerminalData, 250);
 		commands.registerCommand("driveBy.restore", asyncErrorHandler(restore));
 		commands.registerCommand("driveBy.next", asyncErrorHandler(next));
