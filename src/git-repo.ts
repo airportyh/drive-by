@@ -53,7 +53,7 @@ export class GitRepo {
 
     public async restoreCommit(sha: string): Promise<void> {
         await this.queue.push(async () => {
-            if (this.state.head === sha) {
+            if (this.state.masterHead === sha) {
                 await restoreToHead(this.workingDir);
             } else {
                 await restoreToCommitSha(this.workingDir, sha);

@@ -1,4 +1,4 @@
-import { workspace, ExtensionContext, TextDocumentChangeEvent, window, commands, Uri, Terminal, Disposable, TerminalRenderer } from 'vscode';
+import { workspace, ExtensionContext, TextDocumentChangeEvent, window, commands, Uri, Terminal, Disposable, TerminalRenderer, TreeView } from 'vscode';
 import { debounce } from "lodash";
 import { GitLogTreeProvider } from './git-log-tree-provider';
 import * as path from "path";
@@ -23,7 +23,7 @@ export function activate(context: ExtensionContext) {
 	let workingDir: string;
 	let terminalBufferData = "";
 	let treeProvider: GitLogTreeProvider;
-	let treeView;
+	let treeView: TreeView<Commit>;
 	let debouncedDoSaveWithTerminalData;
 	let activeTerminalListener: Disposable | undefined;
 	let terminalRenderer: TerminalRenderer;
@@ -120,7 +120,10 @@ export function activate(context: ExtensionContext) {
 				const uri = Uri.file(path.join(workingDir, commit.changedFiles[0].fileName));
 				window.showTextDocument(uri);
 			}
-			treeView.reveal(commit, { select: true });
+			
+			if (treeView.visible) {
+				treeView.reveal(commit, { select: true });
+			}
 		}
 
 		const terminalDataFilePath = path.join(workingDir, TERMINAL_DATA_FILE_NAME);
