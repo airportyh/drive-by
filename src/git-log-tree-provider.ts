@@ -3,7 +3,7 @@ import { Commit } from "./git-helpers";
 import * as path from "path";
 import { GitRepo, GitRepoState } from "./git-repo";
 import { Subscription } from "rxjs";
-import { findIndex, uniq } from "lodash";
+import { findIndex, uniq, difference } from "lodash";
 
 export class GitLogTreeProvider implements TreeDataProvider<Commit> {
 
@@ -22,6 +22,12 @@ export class GitLogTreeProvider implements TreeDataProvider<Commit> {
 				const newHead = state.head;
 				const newMasterHead = state.branchHead;
 				const shas: string[] = uniq([prevHead, prevMasterHead, newHead, newMasterHead]) as string[];
+				let commitsWithNewAnnotations: string[] = [];
+				if (this.repoState.tags !== state.tags) {
+					// tags changed: assume added
+					const newTagNames = difference(Object.keys(state.tags), Object.keys(this.repoState.tags));
+					commitsWithNewAnnotations = shas.concat((newTagNames.map(tagName => state.tags[tagName].commitSha)));
+				}
 				const hasNewCommit = shas.some((sha) =>
 					!(sha in prevCommits)
 				);
@@ -34,6 +40,9 @@ export class GitLogTreeProvider implements TreeDataProvider<Commit> {
 						if (commit) {
 							this.changeEmitter.fire(commit);
 						}
+					}
+					for (const commitSha of commitsWithNewAnnotations) {
+						this.changeEmitter.fire(commits[commitSha]);
 					}
 				} else {
 					this.changeEmitter.fire(undefined);
@@ -49,19 +58,19 @@ export class GitLogTreeProvider implements TreeDataProvider<Commit> {
 		this.subscription.unsubscribe();
 	}
 
-	isLatest(change: Commit): boolean {
+	isLatest(commit: Commit): boolean {
 		const { shas } = this.repoState;
-		const idx = findIndex(shas, (sha) => sha === change.sha);
+		const idx = findIndex(shas, (sha) => sha === commit.sha);
 		return idx === shas.length - 1;
 	}
 
-	isCurrent(change: Commit): boolean {
+	isCurrent(commit: Commit): boolean {
 		const { head } = this.repoState;
-		return head && head === change.sha || false;
+		return head && head === commit.sha || false;
 	}
 
 	public getTreeItem(node: Commit): TreeItem {
-		const item = new TreeItem(this.getChangeNodeDisplay(node), TreeItemCollapsibleState.None);
+		const item = new TreeItem(this.getCommitNodeDisplay(node), TreeItemCollapsibleState.None);
 		if (this.isLatest(node)) {
 			item.iconPath = Uri.file(path.join(__filename, "..", "..", "media", "latest.svg"));
 		}
@@ -69,7 +78,7 @@ export class GitLogTreeProvider implements TreeDataProvider<Commit> {
 			item.iconPath = Uri.file(path.join(__filename, "..", "..", "media", "current.svg"));
 		}
 		item.id = node.sha;
-		item.contextValue = "change";
+		item.contextValue = "commit";
 		return item;
 	}
 
@@ -87,9 +96,12 @@ export class GitLogTreeProvider implements TreeDataProvider<Commit> {
 		return null;
 	}
 
-	getChangeNodeDisplay(commit: Commit): string {
+	getCommitNodeDisplay(commit: Commit): string {
 		let display;
-		if (commit.changedFiles.length === 1) {
+		const annotation = this.repo.getAnnotation(commit.sha);
+		if (annotation) {
+			display = annotation;
+		} else if (commit.changedFiles.length === 1) {
 			const file = commit.changedFiles[0];
 			display = file.fileName + " | " + file.changeDetail;
 		} else {

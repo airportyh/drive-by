@@ -30,7 +30,8 @@ export class DriveBy {
 		this.registerCommand("driveBy.restore", this.restore);
 		this.registerCommand("driveBy.next", this.next);
         this.registerCommand("driveBy.previous", this.previous);
-        this.registerCommand("driveBy.stop", this.stopSession);
+		this.registerCommand("driveBy.stop", this.stopSession);
+		this.registerCommand("driveBy.annotate", this.annotate);
 		workspace.onDidChangeWorkspaceFolders(asyncErrorHandler(() => this.initialize2()));
 		await this.initialize2();
 	}
@@ -137,6 +138,18 @@ export class DriveBy {
 		this.treeView = window.createTreeView("driveBy", {
 			treeDataProvider: new GitLogTreeProvider(this.repo)
 		});
+	}
+
+	async annotate(commit: Commit): Promise<void> {
+		if (!this.repo) {
+			return;
+		}
+		const message = await window.showInputBox({
+			prompt: "Write a message"
+		});
+		if (message) {
+			await this.repo.createAnnotation(commit.sha, message);
+		}
 	}
 
 	registerTerminal(terminal: Terminal): Disposable {

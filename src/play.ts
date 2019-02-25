@@ -1,26 +1,16 @@
-import { getMasterChangeLog, parseCommitsSummary, getCommit, getCommitShas } from "./git-helpers";
+import { getMasterChangeLog, parseCommitsSummary, getCommit, getCommitShas, getTag, createTag, getTags } from "./git-helpers";
 import * as util from "util";
 import { fs } from "mz";
 import * as child_process from "child_process";
 const dir = "/Users/airportyh/Home/Insiten/TAS-Suite";
 
-main();
-function main() {
-    const child = child_process.spawn("bash", ["-i"], {
-        env: {
-            PS1: "$ "
-        }
-    });
-    child.stdin.write("node -i\n");
-    child.stdout.on("data", (data) => {
-        console.log(data.toString());
-    });
-    child.stderr.on("data", (data) => {
-        console.error(data.toString());
-    });
-    child.on("end", () => {
-        process.exit();
-    });
+main().catch(console.log);
+async function main() {
+    const dir = "/Users/airportyh/Home/Playground/git-play";
+    // const tag = await getTag(dir, "foo");
+    // console.log("tag", tag);
+    console.log(await getTags(dir));
+    // await createTag(dir, "foo", "4a3d89f7bdf82a018262e6d4bc72c0df1bd08c3d", "Line 1.\nLine 2");
 }
 
 async function testGetCommit() {

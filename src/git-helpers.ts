@@ -17,6 +17,12 @@ export type Commit = {
 	message: string
 };
 
+export type Tag = {
+	tagName: string;
+	annotation: string;
+	commitSha: string;
+}
+
 export async function getStatus(workingDir: string): Promise<string> {
 	const options = {
 		cwd: workingDir
@@ -311,6 +317,62 @@ export async function getBranches(workingDir: string): Promise<string[]> {
 	const result = await exec(`git branch`, options);
 	const output = result[0].toString();
 	return output.split("\n").filter(line => !!line).map((line) => line.substring(2));
+}
+
+export async function getTags(workingDir: string): Promise<string[]> {
+	const options = {
+		cwd: workingDir
+	};
+	const result = await exec(`git tag -l`, options);
+	const output = result[0].toString();
+	return output.split("\n").filter(line => !!line);
+}
+
+export async function createTag(workingDir: string, tagName: string, commitSha: string, annotation: string): Promise<void> {
+	const options = {
+		cwd: workingDir
+	};
+	await exec(`git tag -a -m "${annotation}" ${tagName} ${commitSha}`, options);
+}
+
+export async function getTag(workingDir: string, tagName: string): Promise<Tag | null> {
+	const options = {
+		cwd: workingDir
+	};
+	try {
+		const result = await exec(`git tag -v ${tagName}`, options);
+	} catch (e) {
+		const lines = e.message.split("\n");
+		let annotationLines: string[] = [];
+		let state: string = "open";
+		const tag = { tagName } as Tag;
+		for (let line of lines) {
+			let m;
+			if (state === "beginAnnotation") {
+				if (line === "") {
+					state = "collectAnnotation";
+				} else {
+					break;
+				}
+			} else if (state === "collectAnnotation") {
+				if (line === "") {
+					break;
+				} else {
+					annotationLines.push(line);
+				}
+			} else if (state === "open") {
+				if (m = line.match(/^object (.+)$/)) {
+					tag.commitSha = m[1];
+				} else if (m = line.match(/^tagger (.+)$/)) {
+					state = "beginAnnotation";
+				}
+			}
+		}
+		const annotation = annotationLines.join("\n");
+		tag.annotation = annotation;
+		return tag;
+	}
+	return null;
 }
 
 function assertExists<T>(value: T | null | undefined, message: string = "Could not find thing"): T {
