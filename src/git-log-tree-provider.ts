@@ -17,10 +17,10 @@ export class GitLogTreeProvider implements TreeDataProvider<Commit> {
 			if (this.repoState) {
 				// TODO: clean up
 				const prevHead = this.repoState.head;
-				const prevMasterHead = this.repoState.masterHead;
+				const prevMasterHead = this.repoState.branchHead;
 				const prevCommits = this.repoState.commits;
 				const newHead = state.head;
-				const newMasterHead = state.masterHead;
+				const newMasterHead = state.branchHead;
 				const shas: string[] = uniq([prevHead, prevMasterHead, newHead, newMasterHead]) as string[];
 				const hasNewCommit = shas.some((sha) =>
 					!(sha in prevCommits)

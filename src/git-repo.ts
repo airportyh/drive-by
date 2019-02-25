@@ -1,4 +1,4 @@
-import { Commit, isGitInitialized, getHead, getStatus, getMasterChangeLog, getCommitShas, getCommit, reset, getMasterHead, initializeGitRepo, save, restoreToHead, restoreToCommitSha } from "./git-helpers";
+import { Commit, isGitInitialized, getHead, getStatus, getMasterChangeLog, getCommitShas, getCommit, reset, getMasterHead, initializeGitRepo, save, restoreToCommitSha, getBranchHead, getBranches, createBranch, checkoutBranch, restoreToBranch, getBranchChangeLog } from "./git-helpers";
 import _ = require("lodash");
 import { BehaviorSubject, Observable } from "rxjs";
 import { JobQueue } from "./job-queue";
@@ -7,7 +7,7 @@ export type GitRepoState = {
     commits: _.Dictionary<Commit>;
     shas: string[];
     head: string | null;
-    masterHead: string | null;
+    branchHead: string | null;
     workingDirModified: boolean;
 };
 
@@ -16,10 +16,10 @@ export class GitRepo {
     subject$: BehaviorSubject<GitRepoState>;
     queue: JobQueue = new JobQueue();
 
-    private constructor(private workingDir: string) {}
+    private constructor(private workingDir: string, private branch: string) {}
 
-    public static async initialize(workingDir: string): Promise<GitRepo> {
-        const repo = new GitRepo(workingDir);
+    public static async initialize(workingDir: string, branch: string): Promise<GitRepo> {
+        const repo = new GitRepo(workingDir, branch);
         await repo.initialize();
         return repo;
     }
@@ -30,16 +30,22 @@ export class GitRepo {
             if (!initialized) {
                 await initializeGitRepo(this.workingDir);
             }
+            const branches = await getBranches(this.workingDir);
+            if (!_.includes(branches, this.branch)) {
+                await createBranch(this.workingDir, this.branch);
+            } else {
+                await checkoutBranch(this.workingDir, this.branch);
+            }
             
-            const [head, masterHead, workingDirModified, commits] = await Promise.all([
+            const [head, branchHead, workingDirModified, commits] = await Promise.all([
                 getHead(this.workingDir),
-                getMasterHead(this.workingDir),
+                getBranchHead(this.workingDir, this.branch),
                 this.getModified(),
-                getMasterChangeLog(this.workingDir)
+                getBranchChangeLog(this.workingDir, this.branch)
             ]);
             this.subject$ = new BehaviorSubject({
                 head,
-                masterHead,
+                branchHead,
                 workingDirModified,
                 commits: _.keyBy(commits, "sha"),
                 shas: commits && commits.map((commit) => commit.sha) || []
@@ -53,8 +59,8 @@ export class GitRepo {
 
     public async restoreCommit(sha: string): Promise<void> {
         await this.queue.push(async () => {
-            if (this.state.masterHead === sha) {
-                await restoreToHead(this.workingDir);
+            if (this.state.branchHead === sha) {
+                await restoreToBranch(this.workingDir, this.branch);
             } else {
                 await restoreToCommitSha(this.workingDir, sha);
             }
@@ -104,9 +110,9 @@ export class GitRepo {
 
     public async save(beforeSave?: () => Promise<void>) {
         await this.queue.push(async () => {
-            const masterHead = this.state.masterHead;
+            const branchHead = this.state.branchHead;
             const head = this.state.head;
-            if (masterHead === head) {
+            if (branchHead === head) {
                 if (beforeSave) {
                     await beforeSave();
                 }
@@ -114,7 +120,7 @@ export class GitRepo {
                 if (!saved) {
                     return;
                 }
-                const head = await getMasterHead(this.workingDir);
+                const head = await getBranchHead(this.workingDir, this.branch);
                 if (!head) {
                     throw new Error("BLARGH");
                 }
@@ -126,7 +132,7 @@ export class GitRepo {
                     },
                     shas: [...this.state.shas, head],
                     head: head,
-                    masterHead: head,
+                    branchHead: head,
                     workingDirModified: false
                 };
                 this.subject$.next(newState);

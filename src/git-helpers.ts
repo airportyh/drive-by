@@ -25,6 +25,20 @@ export async function getStatus(workingDir: string): Promise<string> {
 	return result[0];
 }
 
+export async function createBranch(workingDir: string, branch: string): Promise<void> {
+	const options = {
+		cwd: workingDir
+	};
+	await exec(`git checkout -b ${branch}`, options);
+}
+
+export async function checkoutBranch(workingDir: string, branch: string): Promise<void> {
+	const options = {
+		cwd: workingDir
+	};
+	await exec(`git checkout ${branch}`, options);
+}
+
 export async function restoreToCommitSha(workingDir: string, sha: string): Promise<void> {
 	const options = {
 		cwd: workingDir
@@ -46,6 +60,13 @@ export async function restoreToHead(workingDir: string): Promise<void> {
 	await exec("git checkout master -f", options);
 }
 
+export async function restoreToBranch(workingDir: string, branch: string): Promise<void> {
+	const options = {
+		cwd: workingDir
+	};
+	await exec(`git checkout ${branch} -f`, options);
+}
+
 export async function getMasterHead(workingDir: string): Promise<string | null> {
 	const options = {
 		cwd: workingDir
@@ -55,13 +76,30 @@ export async function getMasterHead(workingDir: string): Promise<string | null> 
 		const output = result[0].toString().trim();
 		return output;
 	} catch (e) {
-		if (e.message.match(/ambiguous argument \'master\'/)) {
+		if (e.message.match(/ambiguous argument/)) {
 			return null;
 		} else {
 			throw e;
 		}
 	}
 	
+}
+
+export async function getBranchHead(workingDir: string, branch: string): Promise<string | null> {
+	const options = {
+		cwd: workingDir
+	};
+	try {
+		const result = await exec(`git rev-parse ${branch}`, options);
+		const output = result[0].toString().trim();
+		return output;
+	} catch (e) {
+		if (e.message.match(/ambiguous argument/)) {
+			return null;
+		} else {
+			throw e;
+		}
+	}
 }
 
 export async function getHead(workingDir: string): Promise<string | null> {
@@ -73,7 +111,7 @@ export async function getHead(workingDir: string): Promise<string | null> {
 		const output = result[0].toString().trim();
 		return output;
 	} catch (e) {
-		if (e.message.match(/ambiguous argument \'HEAD\'/)) {
+		if (e.message.match(/ambiguous argument/)) {
 			return null;
 		} else {
 			throw e;
@@ -116,6 +154,27 @@ export async function getMasterChangeLog(workingDir: string): Promise<Commit[] |
 		return parseCommitsSummary(output);
 	} catch (e) {
 		if (e.message.match(/ambiguous argument \'master\'/)) {
+			return null;
+		} else {
+			throw e;
+		}
+	}
+}
+
+export async function getBranchChangeLog(workingDir: string, branch: string): Promise<Commit[] | null> {
+	const options = {
+		cwd: workingDir,
+		maxBuffer: 1000000000000
+	};
+	const start = new Date().getTime();
+	try {
+		const result = await exec(`git log --compact-summary --no-color ${branch}`, options);
+		const end = new Date().getTime();
+		const elapsedTime = end - start;
+		const output = result[0].toString();
+		return parseCommitsSummary(output);
+	} catch (e) {
+		if (e.message.match(/ambiguous argument/)) {
 			return null;
 		} else {
 			throw e;
@@ -200,7 +259,8 @@ export function parseCommitsSummary(output: string): Commit[] {
 
 export async function save(workingDir: string): Promise<boolean> {
 	const options = {
-		cwd: workingDir
+		cwd: workingDir,
+		maxBuffer: 1000000000000
 	};
 	await exec("git add .", options);
 	try {
@@ -242,6 +302,15 @@ export async function getTop5ChangedFiles(workingDir: string, sha: string): Prom
 	const result = await exec(`git show ${sha} --pretty=format: --name-only | head -5`, options);
 	const output = result[0].toString();
 	return output.split("\n").filter((line) => !!line);
+}
+
+export async function getBranches(workingDir: string): Promise<string[]> {
+	const options = {
+		cwd: workingDir
+	};
+	const result = await exec(`git branch`, options);
+	const output = result[0].toString();
+	return output.split("\n").filter(line => !!line).map((line) => line.substring(2));
 }
 
 function assertExists<T>(value: T | null | undefined, message: string = "Could not find thing"): T {

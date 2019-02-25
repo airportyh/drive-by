@@ -20,14 +20,18 @@
 			"explorer": [
 				{
 					"id": "driveBy",
-					"name": "Change Log"
+					"name": "Drive By"
 				}
 			]
 		},
 		"commands": [
 			{
-				"command": "driveBy.refresh",
-				"title": "Drive By: Refresh"
+				"command": "driveBy.start",
+				"title": "Start"
+			},
+			{
+				"command": "driveBy.stop",
+				"title": "Stop"
 			},
 			{
 				"command": "driveBy.restore",
@@ -38,16 +42,8 @@
 				"title": "Next"
 			},
 			{
-				"command": "driveBy.nextEdit",
-				"title": "Next Edit"
-			},
-			{
 				"command": "driveBy.previous",
 				"title": "Previous"
-			},
-			{
-				"command": "driveBy.toggleReplay",
-				"title": "Toggle Replay"
 			}
 		],
 		"menus": {
@@ -57,6 +53,12 @@
 					"group": "inline",
 					"when": "viewItem == change"
 				}
+			],
+			"view/title": [
+				{
+					"command": "driveBy.stop",
+					"when": "view == driveBy"
+				}
 			]
 		},
 		"keybindings": [
@@ -65,16 +67,8 @@
 				"key": "alt-ctrl-right"
 			},
 			{
-				"command": "driveBy.nextEdit",
-				"key": "alt-ctrl-shift-right"
-			},
-			{
 				"command": "driveBy.previous",
 				"key": "alt-ctrl-left"
-			},
-			{
-				"command": "driveBy.toggleReplay",
-				"key": "alt-ctrl-space"
 			}
 		]
 	},
