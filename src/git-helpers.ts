@@ -275,6 +275,8 @@ export async function save(workingDir: string): Promise<boolean> {
 	} catch (e) {
 		if (e.message.match(/no changes added to commit/)) {
 			return false;
+		} else if (e.message.match(/nothing to commit/)) {
+			return false;
 		} else {
 			throw e;
 		}
