@@ -273,7 +273,7 @@ export async function save(workingDir: string): Promise<boolean> {
 		await exec("git commit -m 'Update by Drive By.'", options);
 		return true;
 	} catch (e) {
-		if (e.message.match(/nothing to commit/)) {
+		if (e.message.match(/no changes added to commit/)) {
 			return false;
 		} else {
 			throw e;
