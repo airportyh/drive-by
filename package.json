@@ -50,8 +50,20 @@
 				"title": "Previous"
 			},
 			{
-				"command": "driveBy.annotate",
-				"title": "Annotate"
+				"command": "driveBy.beginSection",
+				"title": "Begin Section"
+			},
+			{
+				"command": "driveBy.toggleSections",
+				"title": "Toggle Sections"
+			},
+			{
+				"command": "driveBy.copyCommitSha",
+				"title": "Copy Commit Sha"
+			},
+			{
+				"command": "driveBy.reset",
+				"title": "Reset"
 			}
 		],
 		"menus": {
@@ -62,13 +74,21 @@
 					"when": "viewItem == commit"
 				},
 				{
-					"command": "driveBy.annotate",
+					"command": "driveBy.beginSection",
+					"when": "viewItem == commit"
+				},
+				{
+					"command": "driveBy.copyCommitSha",
 					"when": "viewItem == commit"
 				}
 			],
 			"view/title": [
 				{
 					"command": "driveBy.stop",
+					"when": "view == driveBy"
+				},
+				{
+					"command": "driveBy.toggleSections",
 					"when": "view == driveBy"
 				}
 			]
@@ -81,6 +101,10 @@
 			{
 				"command": "driveBy.previous",
 				"key": "alt-ctrl-left"
+			},
+			{
+				"command": "driveBy.reset",
+				"key": "alt-ctrl-space"
 			}
 		]
 	},

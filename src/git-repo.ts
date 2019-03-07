@@ -2,6 +2,7 @@ import { Commit, isGitInitialized, getHead, getStatus, getMasterChangeLog, getCo
 import _ = require("lodash");
 import { BehaviorSubject, Observable } from "rxjs";
 import { JobQueue } from "./job-queue";
+import { findIndex, findLastIndex } from "lodash";
 
 export type GitRepoState = {
     commits: _.Dictionary<Commit>;
@@ -35,7 +36,9 @@ export class GitRepo {
             if (!_.includes(branches, this.branch)) {
                 await createBranch(this.workingDir, this.branch);
             } else {
-                await checkoutBranch(this.workingDir, this.branch);
+                // TODO: maybe want to check if the current head is within
+                // the path of the active branch
+                // await checkoutBranch(this.workingDir, this.branch);
             }
             
             const [head, branchHead, workingDirModified, commits, tags] = await Promise.all([
@@ -45,7 +48,6 @@ export class GitRepo {
                 getBranchChangeLog(this.workingDir, this.branch),
                 this.getTags()
             ]);
-            console.log("tags", tags);
             this.subject$ = new BehaviorSubject({
                 head,
                 branchHead,
@@ -71,6 +73,64 @@ export class GitRepo {
 
     public getCommit(sha: string): Commit | undefined {
         return this.state.commits[sha];
+    }
+
+    public getSectionCommitCount(sha: string): number {
+        const annotation = this.getAnnotation(sha);
+        if (!annotation) {
+            return 0;
+        }
+        const startIdx = this.state.shas.indexOf(sha);
+        if (startIdx === -1) {
+            return 0;
+        }
+        const nextSectionStartIdx = findIndex(this.state.shas, (sha) => !!this.getAnnotation(sha), startIdx + 1);
+        if (nextSectionStartIdx === -1) {
+            return this.state.shas.length - startIdx;
+        } else {
+            return nextSectionStartIdx - startIdx;
+        }
+    }
+
+    public stepNumberOfHead(sectionSha: string): number {
+        if (!this.state.head) {
+            return 0;
+        }
+        const sectionIdx = this.state.shas.indexOf(sectionSha);
+        const headIdx = this.state.shas.indexOf(this.state.head);
+        return headIdx - sectionIdx + 1;
+    }
+
+    public isHeadInSection(sha: string): boolean {
+        const annotation = this.getAnnotation(sha);
+        if (!annotation) {
+            return false;
+        }
+        const startIdx = this.state.shas.indexOf(sha);
+        if (startIdx === -1) {
+            return false;
+        }
+        const head = this.state.head;
+        if (!head) {
+            return false;
+        }
+        const headIdx = this.state.shas.indexOf(head);
+        const nextSectionStartIdx = findIndex(this.state.shas, (sha) => !!this.getAnnotation(sha), startIdx + 1);
+        if (nextSectionStartIdx === -1) {
+            return this.state.shas.length > headIdx && headIdx >= startIdx;
+        } else {
+            return nextSectionStartIdx > headIdx && headIdx >= startIdx;
+        }
+    }
+
+    public getSectionStart(sha: string): string | null {
+        const idx = this.state.shas.indexOf(sha);
+        const prevSectionStartIdx = findLastIndex(this.state.shas, (sha) => !!this.getAnnotation(sha), idx);
+        if (prevSectionStartIdx === -1) {
+            return null;
+        } else {
+            return this.state.shas[prevSectionStartIdx];
+        }
     }
 
     public getAnnotation(commitSha: string): string | undefined {

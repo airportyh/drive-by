@@ -19,7 +19,6 @@ export class JobQueue {
         this.running = true;
         while (true) {
             const job = this.jobs.shift();
-            window.setStatusBarMessage(`Running ${1} of ${this.jobs.length + 1} jobs.`)
             if (job) {
                 try {
                     await job();
@@ -28,7 +27,6 @@ export class JobQueue {
                 }
             } else {
                 this.running = false;
-                window.setStatusBarMessage(`Job queue emptied.`);
                 break;
             }
         }

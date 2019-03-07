@@ -10,18 +10,22 @@ export class GitLogTreeProvider implements TreeDataProvider<Commit> {
 	private changeEmitter: EventEmitter<Commit | undefined> = new EventEmitter<Commit | undefined>();
 	readonly onDidChangeTreeData: Event<Commit | undefined | null> = this.changeEmitter.event;
 	private repoState: GitRepoState;
+	private _showSections: boolean = false;
 	private subscription: Subscription;
 
-	constructor(private repo: GitRepo) {
+	constructor(private repo: GitRepo, showSections: boolean) {
+		this._showSections = showSections;
 		this.subscription = this.repo.state$.subscribe((state) => {
 			if (this.repoState) {
 				// TODO: clean up
 				const prevHead = this.repoState.head;
 				const prevMasterHead = this.repoState.branchHead;
 				const prevCommits = this.repoState.commits;
+				const prevSectionStart = prevHead && this.repo.getSectionStart(prevHead);
 				const newHead = state.head;
 				const newMasterHead = state.branchHead;
-				const shas: string[] = uniq([prevHead, prevMasterHead, newHead, newMasterHead]) as string[];
+				const newSectionStart = newHead && this.repo.getSectionStart(newHead);
+				const shas: string[] = uniq([prevHead, prevMasterHead, newHead, newMasterHead, prevSectionStart, newSectionStart]) as string[];
 				let commitsWithNewAnnotations: string[] = [];
 				if (this.repoState.tags !== state.tags) {
 					// tags changed: assume added
@@ -58,6 +62,15 @@ export class GitLogTreeProvider implements TreeDataProvider<Commit> {
 		this.subscription.unsubscribe();
 	}
 
+	public set showSections(show: boolean) {
+		this._showSections = show;
+		this.changeEmitter.fire(undefined);
+	}
+
+	public get showSections(): boolean {
+		return this._showSections;
+	}
+
 	isLatest(commit: Commit): boolean {
 		const { shas } = this.repoState;
 		const idx = findIndex(shas, (sha) => sha === commit.sha);
@@ -70,12 +83,22 @@ export class GitLogTreeProvider implements TreeDataProvider<Commit> {
 	}
 
 	public getTreeItem(node: Commit): TreeItem {
+		console.log("get tree item for", node.sha, node.changeSummary);
 		const item = new TreeItem(this.getCommitNodeDisplay(node), TreeItemCollapsibleState.None);
-		if (this.isLatest(node)) {
-			item.iconPath = Uri.file(path.join(__filename, "..", "..", "media", "latest.svg"));
-		}
-		if (this.isCurrent(node)) {
-			item.iconPath = Uri.file(path.join(__filename, "..", "..", "media", "current.svg"));
+		if (this.showSections) {
+			if (this.repo.isHeadInSection(node.sha)) {
+				item.iconPath = Uri.file(path.join(__filename, "..", "..", "media", "current.svg"));
+			}
+		} else {
+			if (this.repo.getAnnotation(node.sha)) {
+				item.iconPath = Uri.file(path.join(__filename, "..", "..", "media", "section.svg"));
+			}
+			if (this.isLatest(node)) {
+				item.iconPath = Uri.file(path.join(__filename, "..", "..", "media", "latest.svg"));
+			}
+			if (this.isCurrent(node)) {
+				item.iconPath = Uri.file(path.join(__filename, "..", "..", "media", "current.svg"));
+			}
 		}
 		item.id = node.sha;
 		item.contextValue = "commit";
@@ -86,7 +109,13 @@ export class GitLogTreeProvider implements TreeDataProvider<Commit> {
 		if (!node) {
 			const commits = this.repoState.shas
 				.map((sha) => this.repoState.commits[sha]);
-			return commits;
+			if (this.showSections) {
+				return commits.filter((commit) => {
+					return !!this.repo.getAnnotation(commit.sha);
+				});
+			} else {
+				return commits;
+			}
 		} else {
 			return [];
 		}
@@ -100,7 +129,13 @@ export class GitLogTreeProvider implements TreeDataProvider<Commit> {
 		let display;
 		const annotation = this.repo.getAnnotation(commit.sha);
 		if (annotation) {
-			display = annotation;
+			const commitCount = this.repo.getSectionCommitCount(commit.sha);
+			if (this.repo.isHeadInSection(commit.sha)) {
+				const stepNumber = this.repo.stepNumberOfHead(commit.sha);
+				display = `${annotation} (${stepNumber} / ${commitCount})`;
+			} else {
+				display = `${annotation} (${commitCount})`;
+			}
 		} else if (commit.changedFiles.length === 1) {
 			const file = commit.changedFiles[0];
 			display = file.fileName + " | " + file.changeDetail;

@@ -2,6 +2,7 @@ import { exec } from "./exec";
 import { fs } from "mz";
 import * as path from "path";
 import { directoryExists } from "./fs-helpers";
+import { parsePatch, IUniDiff } from "diff";
 
 export type FileChangeDetail = {
 	fileName: string,
@@ -134,6 +135,29 @@ export async function getCommit(workingDir: string, sha: string): Promise<Commit
 	const output = result[0].toString();
 	const commits = parseCommitsSummary(output);
 	return commits[0];
+}
+
+export async function getCommitDiff(workingDir: string, sha: string): Promise<IUniDiff[]> {
+	const options = {
+		cwd: workingDir,
+		maxBuffer: 1000000000000
+	};
+	const result = await exec(`git show --no-color ${sha}`, options);
+	const output = result[0].toString();
+	const lines = output.split("\n");
+	let state = "waiting";
+	let diffLines: string[] = [];
+	for (const line of lines) {
+		if (state === "collecting") {
+			diffLines.push(line);
+		} else if (state === "waiting") {
+			if (line.match(/^index (.*)$/)) {
+				state = "collecting";
+			}
+		}
+	}
+	const diff = diffLines.join("\n");
+	return parsePatch(diff);
 }
 
 export async function getCommitShas(workingDir: string): Promise<string[]> {
