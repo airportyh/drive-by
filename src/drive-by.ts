@@ -191,7 +191,6 @@ export class DriveBy {
 			return;
 		}
 		await this.repo.advanceToNextCommit();
-		await this.waitForTextDocumentChangeEvent();
 		await this.postRestoreCommit();
 	}
 
@@ -200,7 +199,6 @@ export class DriveBy {
 			return;
 		}
 		await this.repo.revertToPreviousCommit();
-		await this.waitForTextDocumentChangeEvent();
 		await this.postRestoreCommit();
 	}
 
@@ -215,29 +213,10 @@ export class DriveBy {
 
 	waitForTextDocumentChangeEvent(): Promise<void> {
 		return new Promise((accept) => {
-			if (!this.repo || !this.repo.head) {
+			const unlisten = workspace.onDidChangeTextDocument((e) => {
+				unlisten.dispose();
 				accept();
-				return;
-			}
-			const head = this.repo.head;
-			const commit = this.repo.getCommit(head);
-			if (!commit) {
-				accept();
-				return;
-			}
-			if (commit) {
-				// Open the file and select if it's a single file change - as long as its not
-				// the terminal data file.
-				if (commit.changedFiles.length === 1 && 
-					commit.changedFiles[0].fileName !== this.TERMINAL_DATA_FILE_NAME) {
-					const unlisten = workspace.onDidChangeTextDocument((e) => {
-						unlisten.dispose();
-						accept();
-					});
-				} else {
-					accept();
-				}
-			}
+			});
 		});
 	}
 
@@ -308,6 +287,7 @@ export class DriveBy {
 			// the terminal data file.
 			if (commit.changedFiles.length === 1 && 
 				commit.changedFiles[0].fileName !== this.TERMINAL_DATA_FILE_NAME) {
+				await this.waitForTextDocumentChangeEvent();
 				await this.showAndSelectCurrentChange(commit);
 			}
 			
@@ -375,7 +355,6 @@ export class DriveBy {
 	async restore(commit: Commit): Promise<void> {
 		if (commit && this.repo) {
 			await this.repo.restoreCommit(commit.sha);
-			await this.waitForTextDocumentChangeEvent();
 			await this.postRestoreCommit();
 		}
 	}

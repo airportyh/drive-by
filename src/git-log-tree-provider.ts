@@ -83,7 +83,6 @@ export class GitLogTreeProvider implements TreeDataProvider<Commit> {
 	}
 
 	public getTreeItem(node: Commit): TreeItem {
-		console.log("get tree item for", node.sha, node.changeSummary);
 		const item = new TreeItem(this.getCommitNodeDisplay(node), TreeItemCollapsibleState.None);
 		if (this.showSections) {
 			if (this.repo.isHeadInSection(node.sha)) {
