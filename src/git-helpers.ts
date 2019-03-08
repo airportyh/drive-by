@@ -249,8 +249,13 @@ export function parseCommitsSummary(output: string): Commit[] {
 		} else if (state === "fileset") {
 			const m = line.match((/^ (.+)\|(.+)$/));
 			if (m) {
+				let fileName = m[1].trim();
+				let m2;
+				if (m2 = fileName.match(/^(.*) \(new\)$/)) {
+					fileName = m2[1];
+				}
 				assertExists(commit.changedFiles).push({
-					fileName: m[1].trim(),
+					fileName,
 					changeDetail: m[2].trim()
 				});
 			} else {

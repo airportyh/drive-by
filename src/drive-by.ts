@@ -217,6 +217,10 @@ export class DriveBy {
 				unlisten.dispose();
 				accept();
 			});
+			setTimeout(() => {
+				unlisten.dispose();
+				accept();
+			}, 500);
 		});
 	}
 
@@ -269,6 +273,7 @@ export class DriveBy {
 	}
 
 	async postRestoreCommit(): Promise<void> {
+		console.log("postRestoreCommit");
 		if (!this.repo) {
 			return;
 		}
@@ -282,18 +287,19 @@ export class DriveBy {
 			window.showErrorMessage("Warning: no commit found for head.");
 			return;
 		}
-		if (commit) {
-			// Open the file and select if it's a single file change - as long as its not
-			// the terminal data file.
-			if (commit.changedFiles.length === 1 && 
-				commit.changedFiles[0].fileName !== this.TERMINAL_DATA_FILE_NAME) {
-				await this.waitForTextDocumentChangeEvent();
-				await this.showAndSelectCurrentChange(commit);
-			}
-			
-			if (this.treeView && this.treeView.visible) {
-				this.treeView.reveal(commit, { select: true });
-			}
+		console.log("here");
+		// Open the file and select if it's a single file change - as long as its not
+		// the terminal data file.
+		if (commit.changedFiles.length === 1 && 
+			commit.changedFiles[0].fileName !== this.TERMINAL_DATA_FILE_NAME) {
+			console.log("going to show and select");
+			await this.waitForTextDocumentChangeEvent();
+			console.log("actually show and select");
+			await this.showAndSelectCurrentChange(commit);
+		}
+		
+		if (this.treeView && this.treeView.visible) {
+			this.treeView.reveal(commit, { select: true });
 		}
 
 		const terminalDataFilePath = path.join(this.workingDir, this.TERMINAL_DATA_FILE_NAME);
@@ -308,36 +314,49 @@ export class DriveBy {
 	}
 
 	async showAndSelectCurrentChange(commit: Commit): Promise<void> {
-		const uri = Uri.file(path.join(this.workingDir, commit.changedFiles[0].fileName));
-		await window.showTextDocument(uri);
+		console.log("showAndSelectCurrentChange");
+		const filePath = path.join(this.workingDir, commit.changedFiles[0].fileName);
+		const uri = Uri.file(filePath);
+		try {
+			await window.showTextDocument(uri);
+		} catch (e) {
+			window.showErrorMessage("Could not show: " + JSON.stringify(filePath) + 
+				" for commit " + commit.sha + ", " + commit.changeSummary +
+				" " + 
+				JSON.stringify(e.message));
+			
+			return;
+		}
 		if (window.activeTextEditor) {
 			const diff = await getCommitDiff(this.workingDir, commit.sha);
 			const hunks = diff[0].hunks;
 			const hunk = hunks[hunks.length - 1];
-			const newLines = hunk.lines.filter((line) => line[0] !== "-");
-			const firstNewLineIdx = findIndex(newLines, (line) => line[0] === "+");
-			const firstDeletedLineIdx = findIndex(hunk.lines, (line) => line[0] === "-");
+			if (hunk) {
+				const newLines = hunk.lines.filter((line) => line[0] !== "-");
+				const firstNewLineIdx = findIndex(newLines, (line) => line[0] === "+");
+				const firstDeletedLineIdx = findIndex(hunk.lines, (line) => line[0] === "-");
+					
+				let startPos: Position;
+				let endPos: Position;
 				
-			let startPos: Position;
-			let endPos: Position;
-			
-			if (firstNewLineIdx !== -1) {
-				const firstLine = hunk.newStart + findIndex(newLines, (line) => line[0] === "+") - 1;
-				const lastLine = hunk.newStart + findLastIndex(newLines, (line) => line[0] === "+") - 1;
-				
-				startPos = new Position(firstLine, 0);
-				endPos = new Position(lastLine, Number.MAX_VALUE);
-			} else {
-				// a deletion
-				const firstLine = hunk.newStart + firstDeletedLineIdx;
-				startPos = new Position(firstLine, 0);
-				endPos = startPos;
-				
-			}
+				if (firstNewLineIdx !== -1) {
+					const firstLine = hunk.newStart + findIndex(newLines, (line) => line[0] === "+") - 1;
+					const lastLine = hunk.newStart + findLastIndex(newLines, (line) => line[0] === "+") - 1;
+					
+					startPos = new Position(firstLine, 0);
+					endPos = new Position(lastLine, Number.MAX_VALUE);
+				} else {
+					// a deletion
+					const firstLine = hunk.newStart + firstDeletedLineIdx;
+					startPos = new Position(firstLine, 0);
+					endPos = startPos;
+					
+				}
 
-			const range = new Range(startPos, endPos);
-			window.activeTextEditor.revealRange(range);
-			window.activeTextEditor.selection = new Selection(startPos, endPos);
+				const range = new Range(startPos, endPos);
+				window.activeTextEditor.revealRange(range);
+				window.activeTextEditor.selection = new Selection(startPos, endPos);
+			}
 		}
 	}
 
