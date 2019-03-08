@@ -125,7 +125,8 @@ export class GitRepo {
 
     public getSectionStart(sha: string): string | null {
         const idx = this.state.shas.indexOf(sha);
-        const prevSectionStartIdx = findLastIndex(this.state.shas, (sha) => !!this.getAnnotation(sha), idx);
+        const prevSectionStartIdx = findLastIndex(this.state.shas, 
+            (sha) => !!this.getAnnotation(sha), idx);
         if (prevSectionStartIdx === -1) {
             return null;
         } else {
