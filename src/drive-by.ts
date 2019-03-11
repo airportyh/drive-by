@@ -1,4 +1,4 @@
-import { workspace, ExtensionContext, TextDocumentChangeEvent, window, commands, Uri, Terminal, Disposable, TerminalRenderer, TreeView, Position, ShellExecution, Selection, Range, env } from 'vscode';
+import { workspace, ExtensionContext, TextDocumentChangeEvent, window, commands, Uri, Terminal, Disposable, TerminalRenderer, TreeView, Position, Range, env } from 'vscode';
 import { GitRepo } from './git-repo';
 import { Commit, getBranches, ensureGitInitialized, isGitInitialized, restoreToBranch, getCommitDiff } from './git-helpers';
 import { debounce, findLastIndex, findIndex } from "lodash";
@@ -7,8 +7,6 @@ import * as path from "path";
 import { fs } from "mz";
 import { CantUseTreeProvider, MenuTreeProvider } from './extra-tree-providers';
 import { asyncErrorHandler } from './async-error-handler';
-import * as util from "util";
-import { delay } from './delay';
 
 type WorkingDirState = {
 	activeBranch?: string;
@@ -57,6 +55,12 @@ export class DriveBy {
 		this.workingDir = folder.uri.fsPath;
 		if (this.workingDirState.activeBranch) {
 			await this.activateSession();
+			if (this.repo && this.repo.head) {
+				const headCommit = this.repo.getCommit(this.repo.head);
+				if (headCommit) {
+					this.showProgressInStatusBar(headCommit);
+				}
+			}
 		} else {
 			this.treeView = window.createTreeView("driveBy", { treeDataProvider: new MenuTreeProvider() });
 		}
@@ -273,7 +277,6 @@ export class DriveBy {
 	}
 
 	async postRestoreCommit(): Promise<void> {
-		console.log("postRestoreCommit");
 		if (!this.repo) {
 			return;
 		}
@@ -287,21 +290,43 @@ export class DriveBy {
 			window.showErrorMessage("Warning: no commit found for head.");
 			return;
 		}
-		console.log("here");
+
+		this.showIfIndividualFileCommit(commit);
+		this.showProgressInStatusBar(commit);
+		this.revealInTreeView(commit);
+		this.renderTerminalData();
+	}
+
+	async showIfIndividualFileCommit(commit: Commit): Promise<void> {
 		// Open the file and select if it's a single file change - as long as its not
 		// the terminal data file.
 		if (commit.changedFiles.length === 1 && 
 			commit.changedFiles[0].fileName !== this.TERMINAL_DATA_FILE_NAME) {
-			console.log("going to show and select");
-			await this.waitForTextDocumentChangeEvent();
-			console.log("actually show and select");
 			await this.showAndSelectCurrentChange(commit);
 		}
-		
+	}
+
+	showProgressInStatusBar(commit: Commit) {
+		if (this.repo) {
+			const sectionStart = this.repo.getSectionStart(commit.sha);
+			if (sectionStart) {
+				const sectionTitle = this.repo.getAnnotation(sectionStart);
+				const commitCount = this.repo.getSectionCommitCount(sectionStart);
+				if (this.repo.isHeadInSection(sectionStart)) {
+					const stepNumber = this.repo.stepNumberOfHead(sectionStart);
+					window.setStatusBarMessage(`${sectionTitle} ${stepNumber} / ${commitCount}`);
+				}
+			}
+		}
+	}
+
+	revealInTreeView(commit: Commit) {
 		if (this.treeView && this.treeView.visible) {
 			this.treeView.reveal(commit, { select: true });
 		}
+	}
 
+	async renderTerminalData(): Promise<void> {
 		const terminalDataFilePath = path.join(this.workingDir, this.TERMINAL_DATA_FILE_NAME);
 		try {
 			const terminalData = (await fs.readFile(terminalDataFilePath)).toString();
@@ -314,11 +339,13 @@ export class DriveBy {
 	}
 
 	async showAndSelectCurrentChange(commit: Commit): Promise<void> {
-		console.log("showAndSelectCurrentChange");
+		await this.waitForTextDocumentChangeEvent();
 		const filePath = path.join(this.workingDir, commit.changedFiles[0].fileName);
 		const uri = Uri.file(filePath);
+		const changeRange = await this.getChangeRange(commit.sha);
+		const selection = changeRange && new Range(changeRange[0], changeRange[1]) || undefined;
 		try {
-			await window.showTextDocument(uri);
+			await window.showTextDocument(uri, { selection });
 		} catch (e) {
 			window.showErrorMessage("Could not show: " + JSON.stringify(filePath) + 
 				" for commit " + commit.sha + ", " + commit.changeSummary +
@@ -327,37 +354,35 @@ export class DriveBy {
 			
 			return;
 		}
-		if (window.activeTextEditor) {
-			const diff = await getCommitDiff(this.workingDir, commit.sha);
-			const hunks = diff[0].hunks;
-			const hunk = hunks[hunks.length - 1];
-			if (hunk) {
-				const newLines = hunk.lines.filter((line) => line[0] !== "-");
-				const firstNewLineIdx = findIndex(newLines, (line) => line[0] === "+");
-				const firstDeletedLineIdx = findIndex(hunk.lines, (line) => line[0] === "-");
-					
-				let startPos: Position;
-				let endPos: Position;
-				
-				if (firstNewLineIdx !== -1) {
-					const firstLine = hunk.newStart + findIndex(newLines, (line) => line[0] === "+") - 1;
-					const lastLine = hunk.newStart + findLastIndex(newLines, (line) => line[0] === "+") - 1;
-					
-					startPos = new Position(firstLine, 0);
-					endPos = new Position(lastLine, Number.MAX_VALUE);
-				} else {
-					// a deletion
-					const firstLine = hunk.newStart + firstDeletedLineIdx;
-					startPos = new Position(firstLine, 0);
-					endPos = startPos;
-					
-				}
+	}
 
-				const range = new Range(startPos, endPos);
-				window.activeTextEditor.revealRange(range);
-				window.activeTextEditor.selection = new Selection(startPos, endPos);
+	async getChangeRange(commitSha: string): Promise<[Position, Position] | null> {
+		const diff = await getCommitDiff(this.workingDir, commitSha);
+		const hunks = diff[0].hunks;
+		const hunk = hunks[hunks.length - 1];
+		if (hunk) {
+			const newLines = hunk.lines.filter((line) => line[0] !== "-");
+			const firstNewLineIdx = findIndex(newLines, (line) => line[0] === "+");
+			const firstDeletedLineIdx = findIndex(hunk.lines, (line) => line[0] === "-");
+				
+			let startPos: Position;
+			let endPos: Position;
+			
+			if (firstNewLineIdx !== -1) {
+				const firstLine = hunk.newStart + findIndex(newLines, (line) => line[0] === "+") - 1;
+				const lastLine = hunk.newStart + findLastIndex(newLines, (line) => line[0] === "+") - 1;
+				
+				startPos = new Position(firstLine, 0);
+				endPos = new Position(lastLine, Number.MAX_VALUE);
+			} else {
+				// a deletion
+				const firstLine = hunk.newStart + firstDeletedLineIdx;
+				startPos = new Position(firstLine, 0);
+				endPos = startPos;
 			}
+			return [startPos, endPos];
 		}
+		return null;
 	}
 
 	async doSaveWithTerminalData(): Promise<void> {
