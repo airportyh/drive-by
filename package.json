@@ -99,8 +99,16 @@
 				"key": "alt-ctrl-right"
 			},
 			{
+				"command": "driveBy.next",
+				"key": "pagedown"
+			},
+			{
 				"command": "driveBy.previous",
 				"key": "alt-ctrl-left"
+			},
+			{
+				"command": "driveBy.previous",
+				"key": "pageup"
 			},
 			{
 				"command": "driveBy.reset",
