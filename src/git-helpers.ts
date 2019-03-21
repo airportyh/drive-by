@@ -89,7 +89,6 @@ export async function getMasterHead(workingDir: string): Promise<string | null> 
 			throw e;
 		}
 	}
-	
 }
 
 export async function getBranchHead(workingDir: string, branch: string): Promise<string | null> {
@@ -160,12 +159,12 @@ export async function getCommitDiff(workingDir: string, sha: string): Promise<IU
 	return parsePatch(diff);
 }
 
-export async function getCommitShas(workingDir: string): Promise<string[]> {
+export async function getCommitShas(workingDir: string, branch: string): Promise<string[]> {
 	const options = {
 		cwd: workingDir,
 		maxBuffer: 1000000000000
 	};
-	const result = await exec(`git log --format=format:%H master`, options);
+	const result = await exec(`git log --format=format:%H ${branch}`, options);
 	const output = result[0].toString();
 	return output.split("\n").reverse();
 }

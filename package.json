@@ -64,6 +64,14 @@
 			{
 				"command": "driveBy.reset",
 				"title": "Reset"
+			},
+			{
+				"command": "driveBy.branchHere",
+				"title": "Branch Here..."
+			},
+			{
+				"command": "driveBy.switchBranch",
+				"title": "Switch Branch..."
 			}
 		],
 		"menus": {
@@ -80,6 +88,10 @@
 				{
 					"command": "driveBy.copyCommitSha",
 					"when": "viewItem == commit"
+				},
+				{
+					"command": "driveBy.branchHere",
+					"when": "viewItem == commit"
 				}
 			],
 			"view/title": [
@@ -89,6 +101,10 @@
 				},
 				{
 					"command": "driveBy.toggleSections",
+					"when": "view == driveBy"
+				},
+				{
+					"command": "driveBy.switchBranch",
 					"when": "view == driveBy"
 				}
 			]

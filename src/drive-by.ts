@@ -39,12 +39,14 @@ export class DriveBy {
 		this.registerCommand("driveBy.beginSection", this.beginSection);
 		this.registerCommand("driveBy.toggleSections", this.toggleSections);
 		this.registerCommand("driveBy.copyCommitSha", this.copyCommitSha);
+		this.registerCommand("driveBy.branchHere", this.branchHere);
 		this.registerCommand("driveBy.reset", this.reset);
-		workspace.onDidChangeWorkspaceFolders(asyncErrorHandler(() => this.initialize2()));
-		await this.initialize2();
+		this.registerCommand("driveBy.switchBranch", this.switchBranch);
+		workspace.onDidChangeWorkspaceFolders(asyncErrorHandler(() => this.initializeSession()));
+		await this.initializeSession();
 	}
 
-	async initialize2(): Promise<void> {
+	async initializeSession(): Promise<void> {
 		this.cleanUp();
 		if (!workspace.workspaceFolders || workspace.workspaceFolders.length > 1) {
 			// can't use drive by
@@ -58,7 +60,7 @@ export class DriveBy {
 			if (this.repo && this.repo.head) {
 				const headCommit = this.repo.getCommit(this.repo.head);
 				if (headCommit) {
-					this.showProgressInStatusBar(headCommit);
+					this.showProgressInStatusBar();
 				}
 			}
 		} else {
@@ -113,16 +115,68 @@ export class DriveBy {
 	async copyCommitSha(commit: Commit): Promise<void> {
 		await env.clipboard.writeText(commit.sha);
 	}
+
+	async branchHere(commit: Commit): Promise<void> {
+		if (!this.repo) {
+			return;
+		}
+		const branch = await this.promptForNewBranch();
+		
+		if (branch) {
+			await this.saveWorkingDirState({
+				...this.workingDirState, 
+				activeBranch: branch
+			});
+			await this.repo.branchFrom(commit.sha, branch);
+			this.showProgressInStatusBar();
+		}
+	}
+
+	async switchBranch(): Promise<void> {
+		if (!this.repo) {
+			return;
+		}
+		const branch = await this.promptForExistingBranch();
+		if (branch) {
+			await this.saveWorkingDirState({
+				...this.workingDirState, 
+				activeBranch: branch
+			});
+			await this.repo.switchBranch(branch);
+			this.showProgressInStatusBar();
+		}
+	}
     
     async stopSession(): Promise<void> {
-        if (this.workingDirState.activeBranch) {
+		const branch = this.workingDirState.activeBranch;
+        if (branch) {
 			await this.saveWorkingDirState({});
-            await restoreToBranch(this.workingDir, this.workingDirState.activeBranch);
-            await this.initialize2();
+            await restoreToBranch(this.workingDir, branch);
+            await this.initializeSession();
         }
-    }
+	}
+	
+	async promptForNewBranch(): Promise<string | undefined> {
+		const branches = await getBranches(this.workingDir);
+		let result = await window.showInputBox({
+			prompt: "Create a new branch"
+		});
+		if (result && branches.indexOf(result) !== -1) {
+			window.showErrorMessage(`Cannot create branch ${result}: it already exists.`);
+		} else {
+			return result;
+		}
+		return undefined;
+	}
 
-	async promptForBranch(): Promise<string | null> {
+	async promptForExistingBranch(): Promise<string | undefined> {
+		const branches = await getBranches(this.workingDir);
+		return await window.showQuickPick(branches, {
+			placeHolder: "Which branch to switch to?"
+		});
+	}
+
+	async promptForBranch(): Promise<string | undefined> {
 		const branches = await getBranches(this.workingDir);
 		const CREATE_NEW = "Create new...";
 		const choices: string[] = [
@@ -134,18 +188,13 @@ export class DriveBy {
 		});
 		if (result) {
 			if (result === CREATE_NEW) {
-				result = await window.showInputBox({
-					prompt: "Name the branch"
-                });
-                if (result && branches.indexOf(result) !== -1) {
-					window.showErrorMessage(`Cannot create branch ${result}: it already exists.`);
-				}
+				result = await this.promptForNewBranch();
 			}
 			if (result) {
 				return result;
 			}
 		}
-		return null;
+		return undefined;
 	}
 
 	async activateSession(): Promise<void> {
@@ -292,7 +341,7 @@ export class DriveBy {
 		}
 
 		this.showIfIndividualFileCommit(commit);
-		this.showProgressInStatusBar(commit);
+		this.showProgressInStatusBar();
 		this.revealInTreeView(commit);
 		this.renderTerminalData();
 	}
@@ -306,15 +355,26 @@ export class DriveBy {
 		}
 	}
 
-	showProgressInStatusBar(commit: Commit) {
+	showProgressInStatusBar() {
 		if (this.repo) {
+			const head = this.repo.head;
+			if (!head) {
+				window.showErrorMessage("Warning: no head found.");
+				return;
+			}
+			const commit = this.repo.getCommit(head);
+			if (!commit) {
+				window.showErrorMessage("Warning: no commit found for head.");
+				return;
+			}
 			const sectionStart = this.repo.getSectionStart(commit.sha);
 			if (sectionStart) {
 				const sectionTitle = this.repo.getAnnotation(sectionStart);
 				const commitCount = this.repo.getSectionCommitCount(sectionStart);
 				if (this.repo.isHeadInSection(sectionStart)) {
 					const stepNumber = this.repo.stepNumberOfHead(sectionStart);
-					window.setStatusBarMessage(`${sectionTitle} ${stepNumber} / ${commitCount}`);
+					const branch = this.repo.state.branch;
+					window.setStatusBarMessage(`${branch}: ${sectionTitle} ${stepNumber} / ${commitCount}`);
 				}
 			}
 		}

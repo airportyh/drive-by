@@ -1,8 +1,7 @@
 import { Commit, isGitInitialized, getHead, getStatus, getMasterChangeLog, getCommitShas, getCommit, reset, getMasterHead, initializeGitRepo, save, restoreToCommitSha, getBranchHead, getBranches, createBranch, checkoutBranch, restoreToBranch, getBranchChangeLog, Tag, getTags, getTag, createTag } from "./git-helpers";
-import _ = require("lodash");
 import { BehaviorSubject, Observable } from "rxjs";
 import { JobQueue } from "./job-queue";
-import { findIndex, findLastIndex } from "lodash";
+import { findIndex, findLastIndex, keyBy, includes } from "lodash";
 
 export type GitRepoState = {
     commits: _.Dictionary<Commit>;
@@ -10,7 +9,7 @@ export type GitRepoState = {
     shas: string[];
     head: string | null;
     branchHead: string | null;
-    workingDirModified: boolean;
+    branch: string;
 };
 
 export class GitRepo {
@@ -18,43 +17,43 @@ export class GitRepo {
     subject$: BehaviorSubject<GitRepoState>;
     queue: JobQueue = new JobQueue();
 
-    private constructor(private workingDir: string, private branch: string) {}
+    private constructor(private workingDir: string) {}
 
     public static async initialize(workingDir: string, branch: string): Promise<GitRepo> {
-        const repo = new GitRepo(workingDir, branch);
-        await repo.initialize();
+        const repo = new GitRepo(workingDir);
+        await repo.initialize(branch);
         return repo;
     }
 
-    public async initialize(): Promise<void> {
+    public async initialize(branch: string): Promise<void> {
         await this.queue.push(async () => {
             const initialized = await isGitInitialized(this.workingDir);
             if (!initialized) {
                 await initializeGitRepo(this.workingDir);
             }
             const branches = await getBranches(this.workingDir);
-            if (!_.includes(branches, this.branch)) {
-                await createBranch(this.workingDir, this.branch);
+            if (!includes(branches, branch)) {
+                await createBranch(this.workingDir, branch);
             } else {
                 // TODO: maybe want to check if the current head is within
-                // the path of the active branch
+                // the path of the active branch, and if not, maybe switch
+                // branch or prompt the user
                 // await checkoutBranch(this.workingDir, this.branch);
             }
             
-            const [head, branchHead, workingDirModified, commits, tags] = await Promise.all([
+            const [head, branchHead, commits, tags] = await Promise.all([
                 getHead(this.workingDir),
-                getBranchHead(this.workingDir, this.branch),
-                this.getModified(),
-                getBranchChangeLog(this.workingDir, this.branch),
+                getBranchHead(this.workingDir, branch),
+                getBranchChangeLog(this.workingDir, branch),
                 this.getTags()
             ]);
             this.subject$ = new BehaviorSubject({
                 head,
                 branchHead,
-                workingDirModified,
-                commits: _.keyBy(commits, "sha"),
+                branch,
+                commits: keyBy(commits, "sha"),
                 shas: commits && commits.map((commit) => commit.sha) || [],
-                tags: _.keyBy(tags, "commitSha")
+                tags: keyBy(tags, "commitSha")
             });
         });
     }
@@ -157,20 +156,15 @@ export class GitRepo {
         })
     }
 
-    createSlug(message: string): string {
-        return message.toLowerCase().split(/[^a-z0-9]/g).filter(part => !!part).join("-");
-    }
-
     public async restoreCommit(sha: string): Promise<void> {
         await this.queue.push(async () => {
             if (this.state.branchHead === sha) {
-                await restoreToBranch(this.workingDir, this.branch);
+                await restoreToBranch(this.workingDir, this.state.branch);
             } else {
                 await restoreToCommitSha(this.workingDir, sha);
             }
             this.subject$.next({
                 ...this.state,
-                workingDirModified: false,
                 head: sha
             });
         });
@@ -224,7 +218,7 @@ export class GitRepo {
                 if (!saved) {
                     return;
                 }
-                const head = await getBranchHead(this.workingDir, this.branch);
+                const head = await getBranchHead(this.workingDir, this.state.branch);
                 if (!head) {
                     throw new Error("BLARGH");
                 }
@@ -237,8 +231,8 @@ export class GitRepo {
                     shas: [...this.state.shas, head],
                     head: head,
                     branchHead: head,
-                    workingDirModified: false,
-                    tags: this.state.tags
+                    tags: this.state.tags,
+                    branch: this.state.branch
                 };
                 this.subject$.next(newState);
             }
@@ -247,6 +241,47 @@ export class GitRepo {
 
     public get head(): string | null {
         return this.state.head;
+    }
+
+    public async branchFrom(commitSha: string, newBranch: string): Promise<void> {
+        await restoreToCommitSha(this.workingDir, commitSha);
+        await createBranch(this.workingDir, newBranch);
+        const idx = this.state.shas.indexOf(commitSha);
+        const newShas = this.state.shas.slice(0, idx + 1);
+        const newState = {
+            commits: this.state.commits,
+            shas: newShas,
+            head: commitSha,
+            branchHead: commitSha,
+            tags: this.state.tags,
+            branch: newBranch
+        };
+        this.subject$.next(newState);
+    }
+
+    public async switchBranch(branch: string): Promise<void> {
+        await checkoutBranch(this.workingDir, branch);
+        const shas = await getCommitShas(this.workingDir, branch);
+        const shasToFetch = shas.filter((sha) => !(sha in this.state.commits));
+        const newCommits = await Promise.all(
+            shasToFetch.map((sha) => getCommit(this.workingDir, sha)));
+        const branchHead = await getBranchHead(this.workingDir, branch);
+        const newState = {
+            commits: {
+                ...this.state.commits,
+                ...keyBy(newCommits, "sha")
+            },
+            shas,
+            head: branchHead,
+            branchHead,
+            tags: this.state.tags,
+            branch
+        };
+        this.subject$.next(newState);
+    }
+
+    createSlug(message: string): string {
+        return message.toLowerCase().split(/[^a-z0-9]/g).filter(part => !!part).join("-");
     }
 
     async getModified(): Promise<boolean> {

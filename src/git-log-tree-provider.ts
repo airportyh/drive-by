@@ -16,45 +16,8 @@ export class GitLogTreeProvider implements TreeDataProvider<Commit> {
 	constructor(private repo: GitRepo, showSections: boolean) {
 		this._showSections = showSections;
 		this.subscription = this.repo.state$.subscribe((state) => {
-			if (this.repoState) {
-				// TODO: clean up
-				const prevHead = this.repoState.head;
-				const prevMasterHead = this.repoState.branchHead;
-				const prevCommits = this.repoState.commits;
-				const prevSectionStart = prevHead && this.repo.getSectionStart(prevHead);
-				const newHead = state.head;
-				const newMasterHead = state.branchHead;
-				const newSectionStart = newHead && this.repo.getSectionStart(newHead);
-				const shas: string[] = uniq([prevHead, prevMasterHead, newHead, newMasterHead, prevSectionStart, newSectionStart]) as string[];
-				let commitsWithNewAnnotations: string[] = [];
-				if (this.repoState.tags !== state.tags) {
-					// tags changed: assume added
-					const newTagNames = difference(Object.keys(state.tags), Object.keys(this.repoState.tags));
-					commitsWithNewAnnotations = shas.concat((newTagNames.map(tagName => state.tags[tagName].commitSha)));
-				}
-				const hasNewCommit = shas.some((sha) =>
-					!(sha in prevCommits)
-				);
-				this.repoState = state;
-				if (!hasNewCommit) {
-					const commits = shas
-						.map((sha) => sha && this.repo.getCommit(sha));
-					
-					for (const commit of commits) {
-						if (commit) {
-							this.changeEmitter.fire(commit);
-						}
-					}
-					for (const commitSha of commitsWithNewAnnotations) {
-						this.changeEmitter.fire(commits[commitSha]);
-					}
-				} else {
-					this.changeEmitter.fire(undefined);
-				}
-			} else {
-				this.repoState = state;
-				this.changeEmitter.fire(undefined);
-			}
+			this.repoState = state;
+			this.changeEmitter.fire(undefined);
 		});
 	}
 
