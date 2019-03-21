@@ -53,11 +53,11 @@ export async function restoreToCommitSha(workingDir: string, sha: string): Promi
 	await exec(`git checkout ${sha} -f`, options);
 }
 
-export async function reset(workingDir: string): Promise<void> {
+export async function hardReset(workingDir: string, sha: string): Promise<void> {
 	const options = {
 		cwd: workingDir
 	};
-	await exec(`git reset --hard HEAD`, options);
+	await exec(`git reset --hard ${sha}`, options);
 }
 
 export async function restoreToHead(workingDir: string): Promise<void> {

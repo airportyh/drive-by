@@ -72,6 +72,10 @@
 			{
 				"command": "driveBy.switchBranch",
 				"title": "Switch Branch..."
+			},
+			{
+				"command": "driveBy.revertToCommit",
+				"title": "Revert to this Commit"
 			}
 		],
 		"menus": {
@@ -91,6 +95,10 @@
 				},
 				{
 					"command": "driveBy.branchHere",
+					"when": "viewItem == commit"
+				},
+				{
+					"command": "driveBy.revertToCommit",
 					"when": "viewItem == commit"
 				}
 			],

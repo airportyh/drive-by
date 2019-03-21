@@ -1,4 +1,4 @@
-import { Commit, isGitInitialized, getHead, getStatus, getMasterChangeLog, getCommitShas, getCommit, reset, getMasterHead, initializeGitRepo, save, restoreToCommitSha, getBranchHead, getBranches, createBranch, checkoutBranch, restoreToBranch, getBranchChangeLog, Tag, getTags, getTag, createTag } from "./git-helpers";
+import { Commit, isGitInitialized, getHead, getStatus, getMasterChangeLog, getCommitShas, getCommit, hardReset, getMasterHead, initializeGitRepo, save, restoreToCommitSha, getBranchHead, getBranches, createBranch, checkoutBranch, restoreToBranch, getBranchChangeLog, Tag, getTags, getTag, createTag } from "./git-helpers";
 import { BehaviorSubject, Observable } from "rxjs";
 import { JobQueue } from "./job-queue";
 import { findIndex, findLastIndex, keyBy, includes } from "lodash";
@@ -170,7 +170,7 @@ export class GitRepo {
         });
     }
 
-    public async revertToPreviousCommit(): Promise<void> {
+    public async restoreToPreviousCommit(): Promise<void> {
         await this.queue.push(async () => {
             const head = this.state.head;
             if (!head) {
@@ -188,7 +188,7 @@ export class GitRepo {
         });
     }
 
-    public async advanceToNextCommit(): Promise<void> {
+    public async restoreToNextCommit(): Promise<void> {
         await this.queue.push(async () => {
             const head = this.state.head;
             if (!head) {
@@ -276,6 +276,20 @@ export class GitRepo {
             branchHead,
             tags: this.state.tags,
             branch
+        };
+        this.subject$.next(newState);
+    }
+
+    public async revertToCommit(commitSha: string): Promise<void> {
+        await checkoutBranch(this.workingDir, this.state.branch);
+        await hardReset(this.workingDir, commitSha);
+        const idx = this.state.shas.indexOf(commitSha);
+        const newShas = this.state.shas.slice(0, idx + 1);
+        const newState = {
+            ...this.state,
+            shas: newShas,
+            head: commitSha,
+            branchHead: commitSha
         };
         this.subject$.next(newState);
     }

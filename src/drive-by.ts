@@ -42,6 +42,7 @@ export class DriveBy {
 		this.registerCommand("driveBy.branchHere", this.branchHere);
 		this.registerCommand("driveBy.reset", this.reset);
 		this.registerCommand("driveBy.switchBranch", this.switchBranch);
+		this.registerCommand("driveBy.revertToCommit", this.revertToCommit);
 		workspace.onDidChangeWorkspaceFolders(asyncErrorHandler(() => this.initializeSession()));
 		await this.initializeSession();
 	}
@@ -243,7 +244,7 @@ export class DriveBy {
 		if (!this.repo) {
 			return;
 		}
-		await this.repo.advanceToNextCommit();
+		await this.repo.restoreToNextCommit();
 		await this.postRestoreCommit();
 	}
 
@@ -251,7 +252,7 @@ export class DriveBy {
 		if (!this.repo) {
 			return;
 		}
-		await this.repo.revertToPreviousCommit();
+		await this.repo.restoreToPreviousCommit();
 		await this.postRestoreCommit();
 	}
 
@@ -275,6 +276,14 @@ export class DriveBy {
 				accept();
 			}, 500);
 		});
+	}
+
+	async revertToCommit(commit: Commit): Promise<void> {
+		if (!this.repo) {
+			return;
+		}
+		await this.repo.revertToCommit(commit.sha);
+		this.showProgressInStatusBar();
 	}
 
 	async onChangeDocument(changeEvent: TextDocumentChangeEvent) {
