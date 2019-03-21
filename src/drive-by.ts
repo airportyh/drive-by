@@ -377,14 +377,18 @@ export class DriveBy {
 				return;
 			}
 			const sectionStart = this.repo.getSectionStart(commit.sha);
+			const branch = this.repo.state.branch;
 			if (sectionStart) {
 				const sectionTitle = this.repo.getAnnotation(sectionStart);
 				const commitCount = this.repo.getSectionCommitCount(sectionStart);
 				if (this.repo.isHeadInSection(sectionStart)) {
 					const stepNumber = this.repo.stepNumberOfHead(sectionStart);
-					const branch = this.repo.state.branch;
-					window.setStatusBarMessage(`${branch}: ${sectionTitle} ${stepNumber} / ${commitCount}`);
+					window.setStatusBarMessage(`[${branch}]: ${sectionTitle} ${stepNumber} / ${commitCount}`);
+				} else {
+					window.setStatusBarMessage(`[${branch}]: ${sectionTitle}`)
 				}
+			} else {
+				window.setStatusBarMessage(`[${branch}]`);
 			}
 		}
 	}
