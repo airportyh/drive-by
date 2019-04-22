@@ -3,6 +3,8 @@ import { fs } from "mz";
 import * as path from "path";
 import { directoryExists } from "./fs-helpers";
 import { parsePatch, IUniDiff } from "diff";
+import { findIndex, findLastIndex } from "lodash";
+import assert = require("assert");
 
 export type FileChangeDetail = {
 	fileName: string,
@@ -23,6 +25,21 @@ export type Tag = {
 	annotation: string;
 	commitSha: string;
 }
+
+export type Position = {
+	line: number, 
+	character: number
+};
+
+export type Range = {
+	start: Position,
+	end: Position
+};
+
+export type ChangeRanges = {
+	before: Range,
+	after: Range
+};
 
 export async function getStatus(workingDir: string): Promise<string> {
 	const options = {
@@ -157,6 +174,66 @@ export async function getCommitDiff(workingDir: string, sha: string): Promise<IU
 	}
 	const diff = diffLines.join("\n");
 	return parsePatch(diff);
+}
+
+export async function getChangeRanges(
+	workingDir: string, commitSha: string): Promise<ChangeRanges | undefined> {
+	const diff = await getCommitDiff(workingDir, commitSha);
+	const hunks = diff[0].hunks;
+	const hunk = hunks[hunks.length - 1];
+	if (hunk) {
+		// console.log(hunk);
+		const lines = hunk.lines
+			.filter((line) => line !== "\\ No newline at end of file");
+		const newLines = lines
+			.filter((line) => line[0] !== "-");
+		const oldLines = lines
+			.filter((line) => line[0] !== "+");
+		const firstNewLineIdx = findIndex(newLines, (line) => line[0] === "+");
+		const firstOldLineIdx = findIndex(oldLines, (line) => line[0] === "-");
+		
+		let before, after;
+		if (firstNewLineIdx !== -1) {
+			const firstNewLineNo = hunk.newStart + firstNewLineIdx;
+			const lastNewLineIdx = findLastIndex(newLines, (line) => line[0] === "+");
+			const lastNewLineNo = hunk.newStart + lastNewLineIdx;
+			after = {
+				start: { line: firstNewLineNo, character: 1 },
+				end: { line: lastNewLineNo, character: newLines[lastNewLineIdx].length }
+			}
+		} else {
+			const pos = {
+				line: hunk.newStart + firstOldLineIdx - 1, 
+				character: oldLines[firstOldLineIdx - 1].length
+			};
+			after = {
+				start: pos,
+				end: pos
+			}
+		}
+
+		if (firstOldLineIdx === -1) {
+			const pos = {
+				line: hunk.oldStart + firstNewLineIdx - 1, 
+				character: newLines[firstNewLineIdx - 1].length
+			};
+			before = {
+				start: pos,
+				end: pos
+			}
+		} else {
+			const firstOldLineNo = hunk.oldStart + firstOldLineIdx;
+			const lastOldLineIdx = findLastIndex(oldLines, (line) => line[0] === "-");
+			const lastOldLineNo = hunk.oldStart + lastOldLineIdx;
+			before = {
+				start: { line: firstOldLineNo, character: 1 },
+				end: { line: lastOldLineNo, character: oldLines[lastOldLineIdx].length}
+			};
+		}
+
+		return { before, after };
+	}
+	return undefined;
 }
 
 export async function getCommitShas(workingDir: string, branch: string): Promise<string[]> {

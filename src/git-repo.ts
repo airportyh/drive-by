@@ -170,40 +170,38 @@ export class GitRepo {
         });
     }
 
-    public async restoreToPreviousCommit(): Promise<void> {
-        await this.queue.push(async () => {
-            const head = this.state.head;
-            if (!head) {
-                return;
-            }
-            const shas = this.state.shas;
-            const idx = shas.indexOf(head);
-            if (idx === -1) {
-                throw new Error("BLARG");
-            }
-            if (idx - 1 >= 0) {
-                const previousSha = shas[idx - 1];
-                await this.restoreCommit(previousSha);
-            }
-        });
+    public getPreviousCommit(): Commit | null {
+        const head = this.state.head;
+        if (!head) {
+            return null;
+        }
+        const shas = this.state.shas;
+        const idx = shas.indexOf(head);
+        if (idx !== -1 && idx - 1 >= 0) {
+            const previousSha = shas[idx - 1];
+            return this.state.commits[previousSha];
+        } else {
+            return null;
+        }
     }
 
-    public async restoreToNextCommit(): Promise<void> {
-        await this.queue.push(async () => {
-            const head = this.state.head;
-            if (!head) {
-                return;
-            }
-            const shas = this.state.shas;
-            const idx = shas.indexOf(head);
-            if (idx === -1) {
-                throw new Error("BLARG");
-            }
-            if (idx + 1 < shas.length) {
-                const nextSha = shas[idx + 1];
-                await this.restoreCommit(nextSha);
-            }
-        });
+    public getNextCommit(): Commit | null {
+        const head = this.state.head;
+        if (!head) {
+            return null;
+        }
+        const shas = this.state.shas;
+        const idx = shas.indexOf(head);
+        if (idx !== -1 && idx + 1 < shas.length) {
+            const nextSha = shas[idx + 1];
+            return this.state.commits[nextSha];
+        } else {
+            return null;
+        }
+    }
+
+    public getHeadCommit(): Commit | null {
+        return this.state.head && this.getCommit(this.state.head) || null;
     }
 
     public async save(beforeSave?: () => Promise<void>) {
@@ -280,7 +278,7 @@ export class GitRepo {
         this.subject$.next(newState);
     }
 
-    public async revertToCommit(commitSha: string): Promise<void> {
+    public async resetToCommit(commitSha: string): Promise<void> {
         await checkoutBranch(this.workingDir, this.state.branch);
         await hardReset(this.workingDir, commitSha);
         const idx = this.state.shas.indexOf(commitSha);

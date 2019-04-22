@@ -1,12 +1,15 @@
-import { workspace, ExtensionContext, TextDocumentChangeEvent, window, commands, Uri, Terminal, Disposable, TerminalRenderer, TreeView, Position, Range, env } from 'vscode';
+import * as vscode from "vscode";
+import { workspace, ExtensionContext, TextDocumentChangeEvent, window, commands, Uri, Terminal, Disposable, TerminalRenderer, TreeView, env, Selection, TextEditorRevealType, TextEditor } from 'vscode';
 import { GitRepo } from './git-repo';
-import { Commit, getBranches, ensureGitInitialized, isGitInitialized, restoreToBranch, getCommitDiff } from './git-helpers';
+import { Commit, getBranches, ensureGitInitialized, isGitInitialized, restoreToBranch, getCommitDiff, getChangeRanges, ChangeRanges, Range, Position } from './git-helpers';
 import { debounce, findLastIndex, findIndex } from "lodash";
 import { GitLogTreeProvider } from './git-log-tree-provider';
 import * as path from "path";
 import { fs } from "mz";
 import { CantUseTreeProvider, MenuTreeProvider } from './extra-tree-providers';
 import { asyncErrorHandler } from './async-error-handler';
+import { fileExists } from './fs-helpers';
+import { delay } from "./delay";
 
 type WorkingDirState = {
 	activeBranch?: string;
@@ -42,7 +45,7 @@ export class DriveBy {
 		this.registerCommand("driveBy.branchHere", this.branchHere);
 		this.registerCommand("driveBy.reset", this.reset);
 		this.registerCommand("driveBy.switchBranch", this.switchBranch);
-		this.registerCommand("driveBy.revertToCommit", this.revertToCommit);
+		this.registerCommand("driveBy.revertToCommit", this.resetToCommit);
 		workspace.onDidChangeWorkspaceFolders(asyncErrorHandler(() => this.initializeSession()));
 		await this.initializeSession();
 	}
@@ -240,22 +243,6 @@ export class DriveBy {
 		});
 	}
 
-	async next(): Promise<void> {
-		if (!this.repo) {
-			return;
-		}
-		await this.repo.restoreToNextCommit();
-		await this.postRestoreCommit();
-	}
-
-	async previous(): Promise<void> {
-		if (!this.repo) {
-			return;
-		}
-		await this.repo.restoreToPreviousCommit();
-		await this.postRestoreCommit();
-	}
-
 	async toggleSections(): Promise<void> {
 		if (this.treeProvider) {
 			const state = this.workingDirState;
@@ -278,11 +265,11 @@ export class DriveBy {
 		});
 	}
 
-	async revertToCommit(commit: Commit): Promise<void> {
+	async resetToCommit(commit: Commit): Promise<void> {
 		if (!this.repo) {
 			return;
 		}
-		await this.repo.revertToCommit(commit.sha);
+		await this.repo.resetToCommit(commit.sha);
 		this.showProgressInStatusBar();
 	}
 
@@ -334,34 +321,23 @@ export class DriveBy {
 		}
 	}
 
-	async postRestoreCommit(): Promise<void> {
-		if (!this.repo) {
-			return;
-		}
-		const head = this.repo.head;
-		if (!head) {
-			window.showErrorMessage("Warning: no head found.");
-			return;
-		}
-		const commit = this.repo.getCommit(head);
-		if (!commit) {
-			window.showErrorMessage("Warning: no commit found for head.");
-			return;
-		}
-
-		this.showIfIndividualFileCommit(commit);
+	postRestoreCommit(commit: Commit): void {
 		this.showProgressInStatusBar();
 		this.revealInTreeView(commit);
 		this.renderTerminalData();
 	}
 
-	async showIfIndividualFileCommit(commit: Commit): Promise<void> {
-		// Open the file and select if it's a single file change - as long as its not
-		// the terminal data file.
-		if (commit.changedFiles.length === 1 && 
-			commit.changedFiles[0].fileName !== this.TERMINAL_DATA_FILE_NAME) {
-			await this.showAndSelectCurrentChange(commit);
-		}
+	// async showIfIndividualFileCommit(commit: Commit): Promise<void> {
+	// 	// Open the file and select if it's a single file change - as long as its not
+	// 	// the terminal data file.
+	// 	if (this.isIndividualFileCommit(commit)) {
+	// 		await this.showAndSelectRangeForCommit(commit);
+	// 	}
+	// }
+
+	isIndividualFileCommit(commit: Commit): boolean {
+		return commit.changedFiles.length === 1 && 
+			commit.changedFiles[0].fileName !== this.TERMINAL_DATA_FILE_NAME;
 	}
 
 	showProgressInStatusBar() {
@@ -411,51 +387,53 @@ export class DriveBy {
 		}
 	}
 
-	async showAndSelectCurrentChange(commit: Commit): Promise<void> {
-		await this.waitForTextDocumentChangeEvent();
-		const filePath = path.join(this.workingDir, commit.changedFiles[0].fileName);
+	async showFileAndSelectTextRange(fileName: string, changeRange?: Range): Promise<void> {
+		const filePath = path.join(this.workingDir, fileName);
 		const uri = Uri.file(filePath);
-		const changeRange = await this.getChangeRange(commit.sha);
-		const selection = changeRange && new Range(changeRange[0], changeRange[1]) || undefined;
-		try {
-			await window.showTextDocument(uri, { selection });
-		} catch (e) {
-			window.showErrorMessage("Could not show: " + JSON.stringify(filePath) + 
-				" for commit " + commit.sha + ", " + commit.changeSummary +
-				" " + 
-				JSON.stringify(e.message));
-			
-			return;
-		}
+		const selection = changeRange && new vscode.Range(
+			this.convertPosition(changeRange.start), 
+			this.convertPosition(changeRange.end));
+		await window.showTextDocument(uri, { selection });
 	}
 
-	async getChangeRange(commitSha: string): Promise<[Position, Position] | null> {
-		const diff = await getCommitDiff(this.workingDir, commitSha);
-		const hunks = diff[0].hunks;
-		const hunk = hunks[hunks.length - 1];
-		if (hunk) {
-			const newLines = hunk.lines.filter((line) => line[0] !== "-");
-			const firstNewLineIdx = findIndex(newLines, (line) => line[0] === "+");
-			const firstDeletedLineIdx = findIndex(hunk.lines, (line) => line[0] === "-");
-				
-			let startPos: Position;
-			let endPos: Position;
+	async showFile(fileName: string): Promise<void> {
+		await this.showFileAndSelectTextRange(fileName);
+	}
+
+	// async showAndSelectRangeForCommit(commit: Commit): Promise<void> {
+	// 	await this.waitForTextDocumentChangeEvent();
+	// 	const filePath = path.join(this.workingDir, commit.changedFiles[0].fileName);
+	// 	const uri = Uri.file(filePath);
+	// 	const changeRange = await this.getChangeRange(commit.sha);
+	// 	const selection = changeRange && new Range(changeRange[0], changeRange[1]) || undefined;
+	// 	try {
+	// 		await window.showTextDocument(uri, { selection });
+	// 	} catch (e) {
+	// 		window.showErrorMessage("Could not show: " + JSON.stringify(filePath) + 
+	// 			" for commit " + commit.sha + ", " + commit.changeSummary +
+	// 			" " + 
+	// 			JSON.stringify(e.message));
 			
-			if (firstNewLineIdx !== -1) {
-				const firstLine = hunk.newStart + findIndex(newLines, (line) => line[0] === "+") - 1;
-				const lastLine = hunk.newStart + findLastIndex(newLines, (line) => line[0] === "+") - 1;
-				
-				startPos = new Position(firstLine, 0);
-				endPos = new Position(lastLine, Number.MAX_VALUE);
-			} else {
-				// a deletion
-				const firstLine = hunk.newStart + firstDeletedLineIdx;
-				startPos = new Position(firstLine, 0);
-				endPos = startPos;
-			}
-			return [startPos, endPos];
-		}
-		return null;
+	// 		return;
+	// 	}
+	// }
+
+	// async selectRangeForCommit(commit: Commit): Promise<void> {
+	// 	if (this.isIndividualFileCommit(commit)) {
+	// 		await this.waitForTextDocumentChangeEvent();
+	// 		const filePath = path.join(this.workingDir, commit.changedFiles[0].fileName);
+	// 		const uri = Uri.file(filePath);
+	// 		const changeRange = await this.getChangeRanges(commit.sha);
+	// 		const selection = changeRange && new Selection(changeRange[0], changeRange[1]) || undefined;
+	// 		const editor = window.activeTextEditor;
+	// 		if (selection && editor) {
+	// 			editor.selection = selection;
+	// 		}
+	// 	}
+	// }
+
+	async getChangeRanges(commitSha: string): Promise<ChangeRanges | undefined> {
+		return await getChangeRanges(this.workingDir, commitSha);
 	}
 
 	async doSaveWithTerminalData(): Promise<void> {
@@ -469,10 +447,166 @@ export class DriveBy {
 		await this.repo.save(beforeSave);
 	}
 
-	async restore(commit: Commit): Promise<void> {
-		if (commit && this.repo) {
+	async restore(commit: Commit | null): Promise<void> {
+		if (!commit || !this.repo) {
+			return;
+		}
+		if (this.isIndividualFileCommit(commit)) {
+			const fileName = commit.changedFiles[0].fileName;
+			const changeRanges = await this.getChangeRanges(commit.sha);
+			await this.restoreCommit(commit);
+			await this.waitForTextDocumentChangeEvent();
+			await this.showFileAndSelectTextRange(fileName, changeRanges && changeRanges.after);
+		} else {
+			// this is a multiple file commit
+			await this.restoreCommit(commit);
+		}
+	}
+
+	async next(): Promise<void> {
+		if (!this.repo) {
+			return;
+		}
+		const commit = this.repo.getNextCommit();
+		if (!commit) {
+			return;
+		}
+		
+		if (this.isIndividualFileCommit(commit)) {
+			// this is a single file commit (excluding terminal-data.txt)
+			const fileName = commit.changedFiles[0].fileName;
+			const activeTextEditor = window.activeTextEditor;
+			const changeRanges = await this.getChangeRanges(commit.sha);
+			if (activeTextEditor && this.isFileOpenInEditor(activeTextEditor, fileName)) {
+				// the changed file is in the current text editor
+				if (!changeRanges) {
+					// newly created empty file
+					await this.restoreCommit(commit);
+					await this.showFile(fileName);
+				} else if (this.isPositionVisible(changeRanges.after.start, activeTextEditor.visibleRanges)) {
+					// changed range is already visible in the editor
+					this.selectTextRange(activeTextEditor, changeRanges.before);
+					await delay(100);
+					await this.restoreCommit(commit);
+					await this.waitForTextDocumentChangeEvent();
+					this.selectTextRange(activeTextEditor, changeRanges.after);
+				} else {
+					// changed range is not visible in the editor
+					this.centerToPosition(activeTextEditor, changeRanges.before.start);
+					this.selectTextRange(activeTextEditor, changeRanges.before);
+				}
+			} else {
+				// the changed file isn't in the current text editor
+				if (await this.fileExists(fileName) && changeRanges) {
+					this.showFileAndSelectTextRange(fileName, changeRanges.before);
+				} else {
+					await this.restoreCommit(commit);
+					await this.waitForTextDocumentChangeEvent();
+					await this.showFileAndSelectTextRange(fileName, changeRanges && changeRanges.after);
+				}
+			}
+		} else {
+			// this is a multiple file commit
+			await this.restoreCommit(commit);
+		}
+
+	}
+
+	async previous(): Promise<void> {
+		if (!this.repo) {
+			return;
+		}
+		const commit = this.repo.getHeadCommit();
+		const prevCommit = this.repo.getPreviousCommit();
+		if (!prevCommit || !commit) {
+			return;
+		}
+		
+		if (this.isIndividualFileCommit(commit)) {
+			// we are reverting single file commit (excluding terminal-data.txt)
+			const fileName = commit.changedFiles[0].fileName;
+			const activeTextEditor = window.activeTextEditor;
+			const changeRanges = await this.getChangeRanges(commit.sha);
+			if (activeTextEditor && this.isFileOpenInEditor(activeTextEditor, fileName)) {
+				// the changed file for which we are reverting is in the current text editor
+				if (!changeRanges) {
+					// revert creating an empty file
+					await this.restoreCommit(prevCommit);
+				} else if (this.isPositionVisible(changeRanges.after.start, activeTextEditor.visibleRanges)) {
+					// changed range is already visible in the editor
+					this.selectTextRange(activeTextEditor, changeRanges.after);
+					await delay(100);
+					await this.restoreCommit(prevCommit);
+					await this.waitForTextDocumentChangeEvent();
+					this.selectTextRange(activeTextEditor, changeRanges.before);
+				} else {
+					// changed range is not visible in the editor
+					this.centerToPosition(activeTextEditor, changeRanges.before.start);
+					this.selectTextRange(activeTextEditor, changeRanges.before);
+				}
+			} else {
+				// the changed file for which we are reverting isn't in the current text editor
+				if (await this.fileExists(fileName) && changeRanges) {
+					this.showFileAndSelectTextRange(fileName, changeRanges.before);
+				} else {
+					await this.restoreCommit(prevCommit);
+					await this.waitForTextDocumentChangeEvent();
+					await this.showFileAndSelectTextRange(fileName, changeRanges && changeRanges.before);
+				}
+			}
+		} else {
+			// this is a multiple file commit
+			await this.restoreCommit(prevCommit);
+		}
+
+	}
+
+	convertPosition(position: Position): vscode.Position {
+		return new vscode.Position(position.line - 1, position.character - 1);
+	}
+
+	isPositionVisible(position: Position, visibleRanges: vscode.Range[]): boolean {
+		const pos = this.convertPosition(position);
+		const changeBegin = new vscode.Range(pos, pos);
+		return visibleRanges
+			.some((range) => range.contains(changeBegin));
+	}
+
+	selectTextRange(textEditor: TextEditor, range: Range): void {
+		const start = this.convertPosition(range.start);
+		const end = this.convertPosition(range.end);
+		textEditor.selection = new Selection(start, end);
+	}
+
+	setCursorTo(textEditor: TextEditor, position: Position): void {
+		const pos = this.convertPosition(position);
+		const range = new Selection(pos, pos);
+		textEditor.selection = range;
+	}
+
+	centerToPosition(textEditor: TextEditor, position: Position): void {
+		const pos = this.convertPosition(position);
+		textEditor.revealRange(
+			new Selection(pos, pos), 
+			TextEditorRevealType.InCenter
+		);
+	}
+
+	isFileOpenInEditor(textEditor: TextEditor, fileName: string): boolean {
+		const activeFilePath = textEditor.document.fileName;
+		const relativeActiveFilePath = path.relative(this.workingDir, activeFilePath);
+		return relativeActiveFilePath === fileName;
+	}
+
+	async fileExists(relativeFilePath: string): Promise<boolean> {
+		const fullPath = path.join(this.workingDir, relativeFilePath);
+		return fileExists(fullPath);
+	}
+
+	async restoreCommit(commit: Commit): Promise<void> {
+		if (this.repo) {
 			await this.repo.restoreCommit(commit.sha);
-			await this.postRestoreCommit();
+			await this.postRestoreCommit(commit);
 		}
 	}
 
