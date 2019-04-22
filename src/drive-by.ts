@@ -463,101 +463,158 @@ export class DriveBy {
 		}
 	}
 
-	async next(): Promise<void> {
+	async animateCommit(type: "forward" | "backward"): Promise<void> {
 		if (!this.repo) {
 			return;
 		}
-		const commit = this.repo.getNextCommit();
-		if (!commit) {
+		const commitToRestore = type === "forward" ? this.repo.getNextCommit() : this.repo.getPreviousCommit();
+		if (!commitToRestore) {
 			return;
 		}
+		const commitToAnimate = type === "forward" ? commitToRestore : this.repo.getHeadCommit();
+		if (!commitToAnimate) {
+			return;
+		}
+		const fromProperty = type === "forward" ? "before" : "after";
+		const toProperty = type === "forward" ? "after" : "before";
 		
-		if (this.isIndividualFileCommit(commit)) {
-			// this is a single file commit (excluding terminal-data.txt)
-			const fileName = commit.changedFiles[0].fileName;
-			const activeTextEditor = window.activeTextEditor;
-			const changeRanges = await this.getChangeRanges(commit.sha);
-			if (activeTextEditor && this.isFileOpenInEditor(activeTextEditor, fileName)) {
-				// the changed file is in the current text editor
-				if (!changeRanges) {
-					// newly created empty file
-					await this.restoreCommit(commit);
-					await this.showFile(fileName);
-				} else if (this.isPositionVisible(changeRanges.after.start, activeTextEditor.visibleRanges)) {
-					// changed range is already visible in the editor
-					this.selectTextRange(activeTextEditor, changeRanges.before);
-					await delay(100);
-					await this.restoreCommit(commit);
-					await this.waitForTextDocumentChangeEvent();
-					this.selectTextRange(activeTextEditor, changeRanges.after);
-				} else {
-					// changed range is not visible in the editor
-					this.centerToPosition(activeTextEditor, changeRanges.before.start);
-					this.selectTextRange(activeTextEditor, changeRanges.before);
-				}
-			} else {
-				// the changed file isn't in the current text editor
-				if (await this.fileExists(fileName) && changeRanges) {
-					this.showFileAndSelectTextRange(fileName, changeRanges.before);
-				} else {
-					await this.restoreCommit(commit);
-					await this.waitForTextDocumentChangeEvent();
-					await this.showFileAndSelectTextRange(fileName, changeRanges && changeRanges.after);
-				}
-			}
-		} else {
-			// this is a multiple file commit
-			await this.restoreCommit(commit);
-		}
-
-	}
-
-	async previous(): Promise<void> {
-		if (!this.repo) {
-			return;
-		}
-		const commit = this.repo.getHeadCommit();
-		const prevCommit = this.repo.getPreviousCommit();
-		if (!prevCommit || !commit) {
-			return;
-		}
-		
-		if (this.isIndividualFileCommit(commit)) {
+		if (this.isIndividualFileCommit(commitToAnimate)) {
 			// we are reverting single file commit (excluding terminal-data.txt)
-			const fileName = commit.changedFiles[0].fileName;
+			const fileName = commitToAnimate.changedFiles[0].fileName;
 			const activeTextEditor = window.activeTextEditor;
-			const changeRanges = await this.getChangeRanges(commit.sha);
+			const changeRanges = await this.getChangeRanges(commitToAnimate.sha);
 			if (activeTextEditor && this.isFileOpenInEditor(activeTextEditor, fileName)) {
 				// the changed file for which we are reverting is in the current text editor
 				if (!changeRanges) {
 					// revert creating an empty file
-					await this.restoreCommit(prevCommit);
-				} else if (this.isPositionVisible(changeRanges.after.start, activeTextEditor.visibleRanges)) {
+					await this.restoreCommit(commitToRestore);
+				} else if (this.isPositionVisible(changeRanges[fromProperty].start, activeTextEditor.visibleRanges)) {
 					// changed range is already visible in the editor
-					this.selectTextRange(activeTextEditor, changeRanges.after);
+					this.selectTextRange(activeTextEditor, changeRanges[fromProperty]);
 					await delay(100);
-					await this.restoreCommit(prevCommit);
+					await this.restoreCommit(commitToRestore);
 					await this.waitForTextDocumentChangeEvent();
-					this.selectTextRange(activeTextEditor, changeRanges.before);
+					this.selectTextRange(activeTextEditor, changeRanges[toProperty]);
 				} else {
 					// changed range is not visible in the editor
-					this.centerToPosition(activeTextEditor, changeRanges.before.start);
-					this.selectTextRange(activeTextEditor, changeRanges.before);
+					this.centerToPosition(activeTextEditor, changeRanges[fromProperty].start);
+					this.selectTextRange(activeTextEditor, changeRanges[fromProperty]);
 				}
 			} else {
 				// the changed file for which we are reverting isn't in the current text editor
 				if (await this.fileExists(fileName) && changeRanges) {
-					this.showFileAndSelectTextRange(fileName, changeRanges.before);
+					this.showFileAndSelectTextRange(fileName, changeRanges[fromProperty]);
 				} else {
-					await this.restoreCommit(prevCommit);
+					await this.restoreCommit(commitToRestore);
 					await this.waitForTextDocumentChangeEvent();
-					await this.showFileAndSelectTextRange(fileName, changeRanges && changeRanges.before);
+					await this.showFileAndSelectTextRange(fileName, changeRanges && changeRanges[toProperty]);
 				}
 			}
 		} else {
 			// this is a multiple file commit
-			await this.restoreCommit(prevCommit);
+			await this.restoreCommit(commitToRestore);
 		}
+	}
+
+	async next(): Promise<void> {
+		await this.animateCommit("forward");
+
+		// if (!this.repo) {
+		// 	return;
+		// }
+		// const commit = this.repo.getNextCommit();
+		// if (!commit) {
+		// 	return;
+		// }
+		
+		// if (this.isIndividualFileCommit(commit)) {
+		// 	// this is a single file commit (excluding terminal-data.txt)
+		// 	const fileName = commit.changedFiles[0].fileName;
+		// 	const activeTextEditor = window.activeTextEditor;
+		// 	const changeRanges = await this.getChangeRanges(commit.sha);
+		// 	if (activeTextEditor && this.isFileOpenInEditor(activeTextEditor, fileName)) {
+		// 		// the changed file is in the current text editor
+		// 		if (!changeRanges) {
+		// 			// newly created empty file
+		// 			await this.restoreCommit(commit);
+		// 			await this.showFile(fileName);
+		// 		} else if (this.isPositionVisible(changeRanges.after.start, activeTextEditor.visibleRanges)) {
+		// 			// changed range is already visible in the editor
+		// 			this.selectTextRange(activeTextEditor, changeRanges.before);
+		// 			await delay(100);
+		// 			await this.restoreCommit(commit);
+		// 			await this.waitForTextDocumentChangeEvent();
+		// 			this.selectTextRange(activeTextEditor, changeRanges.after);
+		// 		} else {
+		// 			// changed range is not visible in the editor
+		// 			this.centerToPosition(activeTextEditor, changeRanges.before.start);
+		// 			this.selectTextRange(activeTextEditor, changeRanges.before);
+		// 		}
+		// 	} else {
+		// 		// the changed file isn't in the current text editor
+		// 		if (await this.fileExists(fileName) && changeRanges) {
+		// 			this.showFileAndSelectTextRange(fileName, changeRanges.before);
+		// 		} else {
+		// 			await this.restoreCommit(commit);
+		// 			await this.waitForTextDocumentChangeEvent();
+		// 			await this.showFileAndSelectTextRange(fileName, changeRanges && changeRanges.after);
+		// 		}
+		// 	}
+		// } else {
+		// 	// this is a multiple file commit
+		// 	await this.restoreCommit(commit);
+		// }
+
+	}
+
+	async previous(): Promise<void> {
+		await this.animateCommit("backward");
+
+		// if (!this.repo) {
+		// 	return;
+		// }
+		// const commit = this.repo.getHeadCommit();
+		// const prevCommit = this.repo.getPreviousCommit();
+		// if (!prevCommit || !commit) {
+		// 	return;
+		// }
+		
+		// if (this.isIndividualFileCommit(commit)) {
+		// 	// we are reverting single file commit (excluding terminal-data.txt)
+		// 	const fileName = commit.changedFiles[0].fileName;
+		// 	const activeTextEditor = window.activeTextEditor;
+		// 	const changeRanges = await this.getChangeRanges(commit.sha);
+		// 	if (activeTextEditor && this.isFileOpenInEditor(activeTextEditor, fileName)) {
+		// 		// the changed file for which we are reverting is in the current text editor
+		// 		if (!changeRanges) {
+		// 			// revert creating an empty file
+		// 			await this.restoreCommit(prevCommit);
+		// 		} else if (this.isPositionVisible(changeRanges.after.start, activeTextEditor.visibleRanges)) {
+		// 			// changed range is already visible in the editor
+		// 			this.selectTextRange(activeTextEditor, changeRanges.after);
+		// 			await delay(100);
+		// 			await this.restoreCommit(prevCommit);
+		// 			await this.waitForTextDocumentChangeEvent();
+		// 			this.selectTextRange(activeTextEditor, changeRanges.before);
+		// 		} else {
+		// 			// changed range is not visible in the editor
+		// 			this.centerToPosition(activeTextEditor, changeRanges.before.start);
+		// 			this.selectTextRange(activeTextEditor, changeRanges.before);
+		// 		}
+		// 	} else {
+		// 		// the changed file for which we are reverting isn't in the current text editor
+		// 		if (await this.fileExists(fileName) && changeRanges) {
+		// 			this.showFileAndSelectTextRange(fileName, changeRanges.before);
+		// 		} else {
+		// 			await this.restoreCommit(prevCommit);
+		// 			await this.waitForTextDocumentChangeEvent();
+		// 			await this.showFileAndSelectTextRange(fileName, changeRanges && changeRanges.before);
+		// 		}
+		// 	}
+		// } else {
+		// 	// this is a multiple file commit
+		// 	await this.restoreCommit(prevCommit);
+		// }
 
 	}
 
