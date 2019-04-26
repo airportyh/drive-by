@@ -182,7 +182,7 @@ export async function getChangeRanges(
 	const hunks = diff[0].hunks;
 	const hunk = hunks[hunks.length - 1];
 	if (hunk) {
-		// console.log(hunk);
+		console.log(hunk);
 		const lines = hunk.lines
 			.filter((line) => line !== "\\ No newline at end of file");
 		const newLines = lines
@@ -202,10 +202,18 @@ export async function getChangeRanges(
 				end: { line: lastNewLineNo, character: newLines[lastNewLineIdx].length }
 			}
 		} else {
-			const pos = {
-				line: hunk.newStart + firstOldLineIdx - 1, 
-				character: oldLines[firstOldLineIdx - 1].length
-			};
+			let pos;
+			if (firstOldLineIdx === 0) {
+				pos = {
+					line: 1,
+					character: 1
+				};
+			} else {
+				pos = {
+					line: hunk.newStart + firstOldLineIdx - 1, 
+					character: oldLines[firstOldLineIdx - 1].length
+				};
+			}
 			after = {
 				start: pos,
 				end: pos
@@ -213,10 +221,18 @@ export async function getChangeRanges(
 		}
 
 		if (firstOldLineIdx === -1) {
-			const pos = {
-				line: hunk.oldStart + firstNewLineIdx - 1, 
-				character: newLines[firstNewLineIdx - 1].length
-			};
+			let pos;
+			if (firstNewLineIdx === 0) {
+				pos = {
+					line: 1, 
+					character: 1
+				};
+			} else {
+				pos = {
+					line: hunk.oldStart + firstNewLineIdx - 1, 
+					character: newLines[firstNewLineIdx - 1].length
+				};
+			}
 			before = {
 				start: pos,
 				end: pos
