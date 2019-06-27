@@ -98,11 +98,16 @@ export class GitLogTreeProvider implements TreeDataProvider<Commit> {
 			} else {
 				display = `${annotation} (${commitCount})`;
 			}
-		} else if (commit.changedFiles.length === 1) {
-			const file = commit.changedFiles[0];
-			display = file.fileName + " | " + file.changeDetail;
+		} else if (commit.changedFiles.length === 1 && commit.changedFiles[0].fileName === "terminal-data.txt") {
+			return 'terminal activity'
 		} else {
-			display = commit.changeSummary || commit.message || commit.sha;
+			const nonTerminalChanges = commit.changedFiles.filter(file => file.fileName !== "terminal-data.txt");
+			if (nonTerminalChanges.length === 1) {
+				const file = nonTerminalChanges[0];
+				display = file.fileName + " | " + file.changeDetail;
+			} else {
+				display = commit.changeSummary || commit.message || commit.sha;
+			}
 		}
 		return display;
 	}
