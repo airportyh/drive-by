@@ -23,7 +23,8 @@ export class DriveBy {
 	terminalBufferData = "";
 	treeProvider?: GitLogTreeProvider;
 	treeView: TreeView<Commit> | null = null;
-	debouncedDoSaveWithTerminalData;
+	shortDebouncedSave: () => Promise<any>;
+	longDebouncedSave: () => Promise<any>;
 	disposables: Disposable[] = [];
 	activeTerminalListener: Disposable | null = null;
 	terminalRenderer: TerminalRenderer | null = null;
@@ -211,12 +212,10 @@ export class DriveBy {
 		}
 		this.createReplayTerminal();
 		this.trackActiveTerminal();
-		this.debouncedDoSaveWithTerminalData = debounce(this.doSaveWithTerminalData, 250);
-		const onChange = debounce(asyncErrorHandler(this.onChangeDocument.bind(this)), 500);
-		this.pushDisposable(
-			workspace.onDidChangeTextDocument(onChange));
-		this.pushDisposable(
-			window.onDidChangeActiveTextEditor(asyncErrorHandler(this.onChangeActiveTextEditor.bind(this))));
+		this.shortDebouncedSave = debounce(asyncErrorHandler(() => this.save()), 250);
+		this.longDebouncedSave = debounce(asyncErrorHandler(() => this.shortDebouncedSave()), 500);
+		this.pushDisposable(workspace.onDidChangeTextDocument(this.longDebouncedSave));
+		this.pushDisposable(window.onDidChangeActiveTextEditor(this.longDebouncedSave));
 		this.repo = await GitRepo.initialize(this.workingDir, this.workingDirState.activeBranch);
 		this.treeProvider = new GitLogTreeProvider(this.repo, this.workingDirState.showSections || false);
 		this.treeView = window.createTreeView("driveBy", {
@@ -239,7 +238,7 @@ export class DriveBy {
 	registerTerminal(terminal: Terminal): Disposable {
 		return terminal.onDidWriteData(async (data: string) => {
 			this.terminalBufferData += data;
-			this.debouncedDoSaveWithTerminalData();
+			this.shortDebouncedSave();
 		});
 	}
 
@@ -273,19 +272,6 @@ export class DriveBy {
 		this.showProgressInStatusBar();
 	}
 
-	async onChangeDocument(changeEvent: TextDocumentChangeEvent) {
-		if (!this.repo) {
-			return;
-		}
-		await this.repo.save();
-	}
-
-	async onChangeActiveTextEditor(editor) {
-		if (editor && this.repo) {
-			await this.repo.save();
-		}
-	}
-
 	createReplayTerminal(): void {
 		this.terminalRenderer = window.createTerminalRenderer('Replay Term');
 		this.terminalRenderer.onDidAcceptInput((input) => {
@@ -303,7 +289,7 @@ export class DriveBy {
 		}
 		this.pushDisposable(window.onDidChangeActiveTerminal((terminal) => {
 			this.removeActiveTerminalListener();
-			if (terminal) {
+			if (terminal && terminal.name !== "Replay Term") {
 				this.activeTerminalListener = this.registerTerminal(terminal);
 			}
 		}));
@@ -396,7 +382,7 @@ export class DriveBy {
 		return await getChangeRanges(this.workingDir, commit.sha);
 	}
 
-	async doSaveWithTerminalData(): Promise<void> {
+	async save(): Promise<void> {
 		if (!this.repo) {
 			return;
 		}
