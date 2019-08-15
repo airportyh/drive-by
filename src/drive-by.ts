@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { workspace, ExtensionContext, TextDocumentChangeEvent, window, commands, Uri, Terminal, Disposable, TerminalRenderer, TreeView, env, Selection, TextEditorRevealType, TextEditor } from 'vscode';
+import { workspace, ExtensionContext, TextDocumentChangeEvent, window, commands, Uri, Terminal, Disposable, TreeView, env, Selection, TextEditorRevealType, TextEditor, Pseudoterminal, TerminalDimensions } from 'vscode';
 import { GitRepo } from './git-repo';
 import { Commit, getBranches, ensureGitInitialized, isGitInitialized, restoreToBranch, getCommitDiff, getChangeRanges, ChangeRanges, Range, Position } from './git-helpers';
 import { debounce, findLastIndex, findIndex } from "lodash";
@@ -27,7 +27,8 @@ export class DriveBy {
 	longDebouncedSave: () => Promise<any>;
 	disposables: Disposable[] = [];
 	activeTerminalListener: Disposable | null = null;
-	terminalRenderer: TerminalRenderer | null = null;
+	terminal: Terminal | null = null;
+	terminalWriteEmitter: vscode.EventEmitter<string> | null = null;
 	TERMINAL_DATA_FILE_NAME = "terminal-data.txt";
 
 	constructor(context: ExtensionContext) {
@@ -273,14 +274,19 @@ export class DriveBy {
 	}
 
 	createReplayTerminal(): void {
-		this.terminalRenderer = window.createTerminalRenderer('Replay Term');
-		this.terminalRenderer.onDidAcceptInput((input) => {
-			if (this.terminalRenderer) {
-				this.terminalRenderer.write("\rDon't type in here. This is a replay terminal!\r");
+		this.terminalWriteEmitter = new vscode.EventEmitter<string>();
+		const pty: Pseudoterminal = {
+			onDidWrite: this.terminalWriteEmitter.event,
+			open() {},
+			close() {},
+			handleInput: (input: string) => {
+				if (this.terminalWriteEmitter) {
+					this.terminalWriteEmitter.fire("\rDon't type in here. This is a replay terminal!\r");
+				}
 			}
-		});
-		this.terminalRenderer.terminal.show();
-		this.pushDisposable(this.terminalRenderer.terminal);
+		};
+		this.terminal = window.createTerminal({ name: 'Replay Term', pty });
+		this.pushDisposable(this.terminal);
 	}
 
 	trackActiveTerminal(): void {
@@ -357,8 +363,8 @@ export class DriveBy {
 		const terminalDataFilePath = path.join(this.workingDir, this.TERMINAL_DATA_FILE_NAME);
 		try {
 			const terminalData = (await fs.readFile(terminalDataFilePath)).toString();
-			if (this.terminalRenderer) {
-				this.terminalRenderer.write(terminalData);
+			if (this.terminalWriteEmitter) {
+				this.terminalWriteEmitter.fire(terminalData);
 			}
 		} catch (e) {
 			// if terminal data file doesn't exist, do nothing
@@ -538,7 +544,7 @@ export class DriveBy {
 	cleanUp(): void {
 		this.removeActiveTerminalListener();
 		this.activeTerminalListener = null;
-		this.terminalRenderer = null;
+		this.terminal = null;
 		this.terminalBufferData = "";
 		if (this.treeView) {
 			this.treeView.dispose();
