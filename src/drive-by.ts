@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { workspace, ExtensionContext, TextDocumentChangeEvent, window, commands, Uri, Terminal, Disposable, TreeView, env, Selection, TextEditorRevealType, TextEditor, Pseudoterminal, TerminalDimensions } from 'vscode';
+import { workspace, ExtensionContext, TextDocumentChangeEvent, window, commands, Uri, Terminal, Disposable, TreeView, env, Selection, TextEditorRevealType, TextEditor, Pseudoterminal } from 'vscode';
 import { GitRepo } from './git-repo';
 import { Commit, getBranches, ensureGitInitialized, isGitInitialized, restoreToBranch, getCommitDiff, getChangeRanges, ChangeRanges, Range, Position } from './git-helpers';
 import { debounce, findLastIndex, findIndex } from "lodash";
@@ -236,12 +236,13 @@ export class DriveBy {
 		}
 	}
 
-	registerTerminal(terminal: Terminal): Disposable {
-		return terminal.onDidWriteData(async (data: string) => {
-			this.terminalBufferData += data;
-			this.shortDebouncedSave();
-		});
-	}
+	// registerTerminal(terminal: Terminal): Disposable {
+	// 	console.log("terminal", terminal);
+	// 	return terminal.onDidWriteData(async (data: string) => {
+	// 		this.terminalBufferData += data;
+	// 		this.shortDebouncedSave();
+	// 	});
+	// }
 
 	async toggleSections(): Promise<void> {
 		if (this.treeProvider) {
@@ -285,20 +286,25 @@ export class DriveBy {
 				}
 			}
 		};
-		this.terminal = window.createTerminal({ name: 'Replay Term', pty });
+		this.terminal = window.createTerminal({ name: 'Replay Term', pty } as any);
 		this.pushDisposable(this.terminal);
 	}
 
 	trackActiveTerminal(): void {
-		if (window.activeTerminal) {
-			this.activeTerminalListener = this.registerTerminal(window.activeTerminal);
-		}
-		this.pushDisposable(window.onDidChangeActiveTerminal((terminal) => {
-			this.removeActiveTerminalListener();
-			if (terminal && terminal.name !== "Replay Term") {
-				this.activeTerminalListener = this.registerTerminal(terminal);
-			}
-		}));
+		window.onDidWriteTerminalData(async (e) => {
+			const data = e.data;
+			this.terminalBufferData += data;
+			this.shortDebouncedSave();
+		});
+		// if (window.activeTerminal) {
+		// 	this.activeTerminalListener = this.registerTerminal(window.activeTerminal);
+		// }
+		// this.pushDisposable(window.onDidChangeActiveTerminal((terminal) => {
+		// 	this.removeActiveTerminalListener();
+		// 	if (terminal && terminal.name !== "Replay Term") {
+		// 		this.activeTerminalListener = this.registerTerminal(terminal);
+		// 	}
+		// }));
 	}
 
 	removeActiveTerminalListener(): void {
