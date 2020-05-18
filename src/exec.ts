@@ -1,13 +1,13 @@
 import * as child_process from "child_process";
 
-export function exec(command: string, options: child_process.ExecFileOptions): Promise<string[]> {
+export function exec(command: string, options): Promise<Buffer[]> {
     return new Promise((accept, reject) => {
         child_process.exec(command, options, (err, stdout, stderr) => {
             if (err) {
                 const message = [
                     err.message,
-                    stdout,
-                    stderr
+                    stdout.toString(),
+                    stderr.toString()
                 ].filter((part) => !!part)
                 .join("\n");
                 const customError = new Error(message);

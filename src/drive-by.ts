@@ -236,14 +236,6 @@ export class DriveBy {
 		}
 	}
 
-	// registerTerminal(terminal: Terminal): Disposable {
-	// 	console.log("terminal", terminal);
-	// 	return terminal.onDidWriteData(async (data: string) => {
-	// 		this.terminalBufferData += data;
-	// 		this.shortDebouncedSave();
-	// 	});
-	// }
-
 	async toggleSections(): Promise<void> {
 		if (this.treeProvider) {
 			const state = this.workingDirState;
@@ -296,15 +288,6 @@ export class DriveBy {
 			this.terminalBufferData += data;
 			this.shortDebouncedSave();
 		});
-		// if (window.activeTerminal) {
-		// 	this.activeTerminalListener = this.registerTerminal(window.activeTerminal);
-		// }
-		// this.pushDisposable(window.onDidChangeActiveTerminal((terminal) => {
-		// 	this.removeActiveTerminalListener();
-		// 	if (terminal && terminal.name !== "Replay Term") {
-		// 		this.activeTerminalListener = this.registerTerminal(terminal);
-		// 	}
-		// }));
 	}
 
 	removeActiveTerminalListener(): void {
@@ -326,8 +309,13 @@ export class DriveBy {
 	}
 
 	isIndividualFileCommit(commit: Commit): boolean {
-		return commit.changedFiles.length === 1 && 
-			commit.changedFiles[0].fileName !== this.TERMINAL_DATA_FILE_NAME;
+		const terminalChanges = commit
+			.changedFiles
+			.filter(file => file.fileName === this.TERMINAL_DATA_FILE_NAME);
+		const nonTerminalChanges = commit
+			.changedFiles
+			.filter(file => file.fileName !== this.TERMINAL_DATA_FILE_NAME);
+		return terminalChanges.length === 0 && nonTerminalChanges.length === 1;
 	}
 
 	showProgressInStatusBar() {
@@ -428,9 +416,9 @@ export class DriveBy {
 		if (!commit) {
 			return;
 		}
-		let changeRanges: ChangeRanges | undefined;
-		if (this.isIndividualFileCommit(commit) && 
-			(changeRanges = await this.getChangeRanges(commit))) {
+		const changeRanges = await this.getChangeRanges(commit);
+		const isIndividual = this.isIndividualFileCommit(commit);
+		if (isIndividual && changeRanges) {
 			this.animateChange(
 				commit, 
 				commit.changedFiles[0].fileName, 

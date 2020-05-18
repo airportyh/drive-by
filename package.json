@@ -2,7 +2,7 @@
 	"name": "drive-by",
 	"displayName": "Drive By",
 	"description": "VS Code plugin that records and plays back coding sessions",
-	"version": "0.0.15",
+	"version": "0.0.16",
 	"publisher": "airportyh",
 	"enableProposedApi": true,
 	"repository": {
@@ -149,7 +149,7 @@
 	},
 	"devDependencies": {
 		"@types/mkdirp": "^0.5.2",
-		"@types/node": "*",
+		"@types/node": "^14.0.1",
 		"@types/rimraf": "^2.0.2",
 		"tslint": "^5.11.0",
 		"typescript": "^2.1.4",

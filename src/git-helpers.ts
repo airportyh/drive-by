@@ -46,7 +46,7 @@ export async function getStatus(workingDir: string): Promise<string> {
 		cwd: workingDir
 	};
 	const result = await exec(`git status`, options);
-	return result[0];
+	return result[0].toString();
 }
 
 export async function createBranch(workingDir: string, branch: string): Promise<void> {
@@ -182,7 +182,6 @@ export async function getChangeRanges(
 	const hunks = diff[0].hunks;
 	const hunk = hunks[hunks.length - 1];
 	if (hunk) {
-		console.log(hunk);
 		const lines = hunk.lines
 			.filter((line) => line !== "\\ No newline at end of file");
 		const newLines = lines

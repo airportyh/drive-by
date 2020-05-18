@@ -101,7 +101,9 @@ export class GitLogTreeProvider implements TreeDataProvider<Commit> {
 		} else if (commit.changedFiles.length === 1 && commit.changedFiles[0].fileName === "terminal-data.txt") {
 			return 'terminal activity'
 		} else {
-			const nonTerminalChanges = commit.changedFiles.filter(file => file.fileName !== "terminal-data.txt");
+			const nonTerminalChanges = commit
+				.changedFiles
+				.filter(file => file.fileName !== "terminal-data.txt");
 			if (nonTerminalChanges.length === 1) {
 				const file = nonTerminalChanges[0];
 				display = file.fileName + " | " + file.changeDetail;
